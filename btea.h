@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 typedef unsigned uint32;
+typedef unsigned short uint16;
 
 typedef int BOOL;
 #define FALSE 0

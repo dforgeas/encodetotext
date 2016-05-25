@@ -22,18 +22,51 @@ g++ -ansi -pedantic -Wall -march=native -O2 -fno-strict-aliasing -o encodetotext
 #include <exception>
 #include <limits>
 #include <cstring>
+#include <climits>
+#include <arpa/inet.h>
 
 #include "btea.h"
-
-static uint32 static_key[4] = {3449741923u, 1428823133u, 719882406u, 2957402939u};
 
 using namespace std;
 using namespace std::tr1;
 
-#define static_assert(exp) namespace { typedef char static_assert_[(exp) ? 1 : -1]; }
-static_assert(sizeof(unsigned short) == 2)
+// + promotes to int, gets the unsigned value even if n is signed
+#define to_byte(n) (+static_cast<unsigned char>(n))
 
-#define to_byte(n) (static_cast<unsigned char>(n))
+#define STATIC static
+
+STATIC uint32 readu32(const char *buffer)
+{
+   uint32 i;
+   memcpy(&i, buffer, sizeof i);
+   return ntohl(i);
+}
+
+STATIC void writeu32(char *buffer, const uint32 value)
+{
+   const uint32 i = htonl(value);
+   memcpy(buffer, &i, sizeof i);
+}
+
+STATIC uint16 readu16(const char *buffer)
+{
+   uint16 i;
+   memcpy(&i, buffer, sizeof i);
+   return ntohs(i);
+}
+
+STATIC void writeu16(char *buffer, const uint16 value)
+{
+   const uint16 i = htons(value);
+   memcpy(buffer, &i, sizeof i);
+}
+
+static uint32 static_key[4] = {3449741923u, 1428823133u, 719882406u, 2957402939u};
+
+#define static_assert(exp) namespace { typedef char static_assert_[(exp) ? 1 : -1]; }
+static_assert(CHAR_BIT == 8);
+static_assert(sizeof(uint16) == 2)
+static_assert(sizeof(uint32) == 4)
 
 struct error: exception
 {
@@ -77,11 +110,16 @@ static void load_static_key()
    ifstream in("encode.key", ios::in | ios::binary);
    if (in)
    {
-      in.read(reinterpret_cast<char *>(static_key), sizeof static_key);
+      char buffer[sizeof static_key];
+      in.read(buffer, sizeof static_key);
       if (in.gcount() != sizeof static_key)
       {
          throw error(__FILE__, __LINE__, "invalid key");
       }
+      static_key[0] = readu32(buffer);
+      static_key[1] = readu32(buffer + 4);
+      static_key[2] = readu32(buffer + 8);
+      static_key[3] = readu32(buffer + 12);
       cerr << "new key loaded." << endl;
    }
    else
@@ -112,7 +150,7 @@ struct comparable_pair: pair<T1, T2>
    }
 };
 
-static const size_t BUFFER_SIZE = 4*1024 * sizeof(uint32); // ensure multiple of sizeof(uint32)
+static const streamsize BUFFER_SIZE = 4*1024 * sizeof(uint32); // ensure multiple of sizeof(uint32)
 
 static void pad_and_crypt(char *const buffer, streamsize &bytes_read)
 {
@@ -133,13 +171,26 @@ static void pad_and_crypt(char *const buffer, streamsize &bytes_read)
       }
    }
 
+   // convert to native integers
+   const streamsize native_buffer_size = BUFFER_SIZE / sizeof(uint32);
+   const streamsize data_size = bytes_read / sizeof(uint32);
+   uint32 native_buffer[native_buffer_size];
+   for (streamsize i = 0; i < data_size; ++i) {
+      native_buffer[i] = readu32(buffer + sizeof(uint32) * i);
+   }
+
    // crypt
-   BOOL btea_result = btea(reinterpret_cast<uint32 *>(buffer), bytes_read / sizeof(uint32), static_key);
-   if ( ! btea_result)
+   BOOL btea_result = btea(native_buffer, data_size, static_key);
+   if (not btea_result)
    {
       ostringstream msg;
-      msg << "btea failed with size " << (bytes_read / sizeof(uint32));
+      msg << "btea failed with size " << data_size;
       throw error(__FILE__, __LINE__, msg.str());
+   }
+
+   // convert back to bytes
+   for (streamsize i = 0; i < data_size; ++i) {
+      writeu32(buffer + sizeof(uint32) * i, native_buffer[i]);
    }
 }
 
@@ -154,13 +205,12 @@ static void encode(const deque<string> &words, istream &in, ostream &out)
       pad_and_crypt(buffer, bytes_read); // buffer and bytes_read are updated
       if (bytes_read == 0) { assert(bytes_read != 0); break; } // never happens because of padding, but the loop will exit on if (!in) break;
 
-      // this makes it endianness dependent, here a little endian machine
-      unsigned short *data = reinterpret_cast<unsigned short *>(buffer);
-      streamsize data_size = bytes_read / 2;
-      for (streamsize i = 0; i < data_size; ++i)
-         out << words[data[i]] << ' ';
+      const streamsize data_size = bytes_read / sizeof(uint16);
+      for (streamsize i = 0; i < data_size; ++i) {
+         out << words[readu16(buffer + sizeof(uint16) * i)] << ' ';
+      }
 
-      if ( ! in) break;
+      if (not in) break;
    }
 }
 
@@ -174,7 +224,7 @@ namespace buff_option
    };
 }
 
-static char *bufferise_data(unsigned short data, buff_option::e option = buff_option::nothing)
+static char *bufferise_data(const uint16 data, buff_option::e option = buff_option::nothing)
 {
    static char buffer[BUFFER_SIZE];
    static streamsize data_size = 0;
@@ -182,8 +232,7 @@ static char *bufferise_data(unsigned short data, buff_option::e option = buff_op
    switch (option)
    {
    case buff_option::nothing:
-      // little endian machine only
-      *reinterpret_cast<unsigned short *>(buffer + data_size) = data;
+      writeu16(buffer + data_size, data);
       data_size += sizeof data;
       assert(data_size <= BUFFER_SIZE);
       if (data_size == BUFFER_SIZE)
@@ -225,8 +274,8 @@ static void remove_padding(ostream &out, const char *const buffer, streamsize da
          const streamsize padding_size = prev_buffer[prev_data_size - 1];
 
          // check that padding is correct
-         if (prev_data_size > 8 && (padding_size < 1 || padding_size > 4)
-            || (padding_size < 1 || padding_size > 8))
+         if (prev_data_size > 8 and (padding_size < 1 or padding_size > 4)
+            or (padding_size < 1 or padding_size > 8))
             goto invalid_padding;
          for (streamsize current = prev_data_size - 2; current > prev_data_size - padding_size; --current)
             if (prev_buffer[current] != static_cast<char>(padding_size))
@@ -244,18 +293,18 @@ static void remove_padding(ostream &out, const char *const buffer, streamsize da
 
 invalid_padding:
    ostringstream msg;
-   msg << "invalid padding: " << hex << + to_byte(prev_buffer[prev_data_size-4]) // + promotes to int
-      << ' ' << + to_byte(prev_buffer[prev_data_size-3]) // display the byte value (works if char is signed too)
-      << ' ' << + to_byte(prev_buffer[prev_data_size-2]) << ' ' << + to_byte(prev_buffer[prev_data_size-1]);
+   msg << "invalid padding: " << hex << to_byte(prev_buffer[prev_data_size-4])
+      << ' ' << to_byte(prev_buffer[prev_data_size-3])
+      << ' ' << to_byte(prev_buffer[prev_data_size-2]) << ' ' << to_byte(prev_buffer[prev_data_size-1]);
    throw error(__FILE__, __LINE__, msg.str());
 }
 
-static void decode(const unordered_map<string, unsigned short> &words_rev, istream &in, ostream &out)
+static void decode(const unordered_map<string, uint16> &words_rev, istream &in, ostream &out)
 {
    string word;
    while (in >> word)
    {
-      unordered_map<string, unsigned short>::const_iterator words_rev_iter = words_rev.find(word);
+      unordered_map<string, uint16>::const_iterator words_rev_iter = words_rev.find(word);
       if (words_rev_iter == words_rev.end())
       {
          string msg("unexpected word: `");
@@ -263,36 +312,61 @@ static void decode(const unordered_map<string, unsigned short> &words_rev, istre
          throw error(__FILE__, __LINE__, msg);
       }
       char *pbuffer;
-      if ((pbuffer = bufferise_data(words_rev_iter->second)))
+      if (0 != (pbuffer = bufferise_data(words_rev_iter->second)))
       { // the buffer is full, process it without padding
+
+         // convert to native integers
+         const streamsize data_size = BUFFER_SIZE / sizeof(uint32);
+         uint32 native_buffer[data_size];
+         for (streamsize i = 0; i < data_size; ++i) {
+            native_buffer[i] = readu32(pbuffer + sizeof(uint32) * i);
+         }
+
          // decrypt
-         BOOL btea_result = btea(reinterpret_cast<uint32 *>(pbuffer),
-            -static_cast<int>(BUFFER_SIZE) / static_cast<int>(sizeof(uint32)), static_key);
-         if ( ! btea_result)
+         BOOL btea_result = btea(native_buffer, -data_size, static_key);
+         if (not btea_result)
          {
             ostringstream msg;
-            msg << "btea failed with size " << (-static_cast<int>(BUFFER_SIZE) / static_cast<int>(sizeof(uint32)));
+            msg << "btea failed with size " << -data_size;
             throw error(__FILE__, __LINE__, msg.str());
+         }
+
+         // convert back to bytes
+         for (streamsize i = 0; i < data_size; ++i) {
+            writeu32(pbuffer + sizeof(uint32) * i, native_buffer[i]);
          }
          remove_padding(out, pbuffer, BUFFER_SIZE);
       }
    }
 
    // special case for the last block, which may be partial
-   streamsize data_size = *reinterpret_cast<streamsize *>(bufferise_data(0, buff_option::size));
+   const streamsize data_size = *reinterpret_cast<streamsize *>(bufferise_data(0, buff_option::size));
    char *pbuffer = bufferise_data(0, buff_option::eof);
 
    // when the previous block ends on a block boundary, there may be no data left
    if (data_size > 0)
    {
-      BOOL btea_result = btea(reinterpret_cast<uint32 *>(pbuffer),
-         -static_cast<int>(data_size) / static_cast<int>(sizeof(uint32)), static_key);
-      if ( ! btea_result)
+      // convert to native integers
+      const streamsize native_buffer_size = BUFFER_SIZE / sizeof(uint32);
+      const streamsize contents_size = data_size / sizeof(uint32);
+      uint32 native_buffer[native_buffer_size];
+      for (streamsize i = 0; i < contents_size; ++i) {
+         native_buffer[i] = readu32(pbuffer + sizeof(uint32) * i);
+      }
+
+      BOOL btea_result = btea(native_buffer, -contents_size, static_key);
+      if (not btea_result)
       {
          ostringstream msg;
-         msg << "btea failed with size " << (-static_cast<int>(data_size) / static_cast<int>(sizeof(uint32)));
+         msg << "btea failed with size " << -contents_size;
          throw error(__FILE__, __LINE__, msg.str());
       }
+
+      // convert back to bytes
+      for (streamsize i = 0; i < contents_size; ++i) {
+         writeu32(pbuffer + sizeof(uint32) * i, native_buffer[i]);
+      }
+
       remove_padding(out, pbuffer, data_size);
    }
 
@@ -327,17 +401,17 @@ static void generate_words(deque<string> &words)
    sort(all_words.begin(), all_words.end(), greater<string>());
 
    { // delete pqueue_words at the end
-      typedef comparable_pair<size_t, size_t> elem_t;
+      typedef comparable_pair<streamsize, streamsize> elem_t;
       // use greater instead of less to get the lowest elem_t at the top
       priority_queue<elem_t, deque<elem_t>, greater<elem_t> > pqueue_words;
 
       cerr << "filling the size queue..." << endl;
-      size_t i = 0;
+      streamsize i = 0;
       for (deque<string>::const_iterator iter = all_words.begin()
           ; iter != all_words.end()
           ; ++iter)
       { // negate the size to get the largest word at the top
-         pqueue_words.push(elem_t(numeric_limits<size_t>::max() - iter->size(), i++));
+         pqueue_words.push(elem_t(numeric_limits<streamsize>::max() - iter->size(), i++));
       }
 
       cerr << "deleting the longest words..." << endl;
@@ -376,7 +450,7 @@ static bool quick_start(deque<string> &words)
          words.push_back(line);
    }
 
-   size_t size = words.size();
+   streamsize size = words.size();
    bool result = size == 1 << 16;
    if ( ! result) // failure
    {
@@ -399,10 +473,10 @@ static void save_words(const deque<string> &words)
    }
 }
 
-static void reverse_words(const deque<string> &words, unordered_map<string, unsigned short> &words_rev)
+static void reverse_words(const deque<string> &words, unordered_map<string, uint16> &words_rev)
 {
    cerr << "creating the map for the reversal..." << endl;
-   unsigned short j = 0;
+   uint16 j = 0;
    for (deque<string>::const_iterator iter = words.begin()
        ; iter != words.end()
        ; ++iter)
@@ -465,7 +539,7 @@ static int work(int argc, char *argv[])
    }
    else
    {
-      unordered_map<string, unsigned short> words_rev;
+      unordered_map<string, uint16> words_rev;
       reverse_words(words, words_rev);
 
       cerr << "decoding the file..." << endl;
@@ -478,7 +552,21 @@ static int work(int argc, char *argv[])
 #else
 static int unit_tests(int argc, char *argv[])
 {
-   size_t start, stop;
+#if 0
+   for (uint32 i = 0; i <= std::numeric_limits<uint16>::max(); ++i) {
+      char buffer[sizeof(uint32)];
+      writeu32(buffer, i);
+      assert(i == readu32(buffer));
+      writeu16(buffer, i);
+      assert(i == readu16(buffer));
+      for (uint32 j = 0; j < std::numeric_limits<uint16>::max(); ++j) {
+         const uint32 value = i << 16 | j;
+         writeu32(buffer, value);
+         assert(value == readu32(buffer));
+      }
+   }
+#endif
+   streamsize start, stop;
    if (argc > 2)
    {
       {
@@ -521,16 +609,16 @@ static int unit_tests(int argc, char *argv[])
    }
    load_static_key();
 
-   unordered_map<string, unsigned short> words_rev;
+   unordered_map<string, uint16> words_rev;
    reverse_words(words, words_rev);
 
    cerr << "starting tests..."<< endl;
    vector<bool> results(stop - start);
 
-   for (size_t n = start; n < stop; ++n)
+   for (streamsize n = start; n < stop; ++n)
    { // test for size n
       stringstream in, out, result("!"); // impossible result because in starts with 'a'
-      for (size_t i = 0; i < n; ++i)
+      for (streamsize i = 0; i < n; ++i)
       {
          in << static_cast<char>(i + 'a');
       }
@@ -558,7 +646,7 @@ static int unit_tests(int argc, char *argv[])
    }
 
    /* display the results */
-   size_t total = 0, failed = 0;
+   streamsize total = 0, failed = 0;
    cout << "\nFAILED: ";
    for (vector<bool>::const_iterator it = results.begin()
        ; it != results.end()

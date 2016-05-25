@@ -1,0 +1,47 @@
+#define BTEA_EXPORT
+#include "btea.h"
+
+#include <stdio.h>
+
+/* golden number phi = (1 + sqrt(5)) / 2
+2^32 / phi = 0x9e3779b9 */
+#define DELTA 0x9e3779b9
+#define MX ((z>>5 ^ y<<2) + (y>>3 ^ z<<4)  ^  (sum^y) + (key[(p&3)^e] ^ z))
+
+BTEA_API
+BOOL CALLCONV btea(uint32 *v, int n, uint32 const key[4]) {
+	uint32 y, z, sum;
+	unsigned p, rounds, e;
+	if (n > 1) {          /* Coding Part */
+	  rounds = 2*6 + 2*52/n;
+	  sum = 0;
+	  z = v[n-1];
+	  do {
+		sum += DELTA;
+		e = sum >> 2 & 3;
+		for (p = 0; p < n-1; p++) {
+		  y = v[p+1]; 
+		  z = v[p] += MX;
+		}
+		y = v[0];
+		z = v[p] += MX; /* p == n-1 */
+	  } while (--rounds);
+	  return TRUE;
+	} else if (n < -1) {  /* Decoding Part */
+	  n = -n;
+	  rounds = 2*6 + 2*52/n;
+	  sum = rounds*DELTA;
+	  y = v[0];
+	  do {
+		e = sum >> 2 & 3;
+		for (p = n-1; p > 0; p--) {
+		  z = v[p-1];
+		  y = v[p] -= MX;
+		}
+		z = v[n-1];
+		y = v[0] -= MX;
+	  } while ((sum -= DELTA) != 0);
+	  return TRUE;
+	}
+	return FALSE; /* no encoding happened */
+}

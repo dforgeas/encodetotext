@@ -475,7 +475,16 @@ static int work(int argc, char *argv[])
    return 0;
 }
 
-#else
+#else // UNIT_TESTS
+   #if FULL_TESTS
+static void writeToFile(istream& data, const string& filename)
+{
+   ofstream out(filename.c_str(), std::ios::binary);
+   assert(out.is_open());
+   out << data.rdbuf(); // this just copies everything
+}
+   #endif
+
 static int unit_tests(int argc, char *argv[])
 {
    size_t start, stop;
@@ -543,8 +552,16 @@ static int unit_tests(int argc, char *argv[])
          assert(0 == out.tellp());
          encode(words, in, out);
 
+   #if FULL_TESTS
+         /* save the encoded data */
+         ostringstream filename;
+         filename << "data/out" << n << ".txt";
+         writeToFile(out, filename.str());
+   #endif
+
          /* prepare and decode */
          out.clear();
+         out.seekg(0);
          assert(0 == out.tellg());
          assert(0 == result.tellp());
          decode(words_rev, out, result);

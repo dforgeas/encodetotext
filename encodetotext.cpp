@@ -150,7 +150,7 @@ struct comparable_pair: pair<T1, T2>
    }
 };
 
-static const streamsize BUFFER_SIZE = 4*1024 * sizeof(uint32); // ensure multiple of sizeof(uint32)
+static const streamsize BUFFER_SIZE = 4 * sizeof(uint32) << 10; // ensure multiple of sizeof(uint32)
 
 static void pad_and_crypt(char *const buffer, streamsize &bytes_read)
 {
@@ -549,10 +549,19 @@ static int work(int argc, char *argv[])
    return 0;
 }
 
-#else
+#else // UNIT_TESTS
+   #if FULL_TESTS
+static void writeToFile(istream& data, const string& filename)
+{
+   ofstream out(filename.c_str(), std::ios::binary);
+   assert(out.is_open());
+   out << data.rdbuf(); // this just copies everything
+}
+   #endif
+
 static int unit_tests(int argc, char *argv[])
 {
-#if 0
+   #if FULL_TESTS
    for (uint32 i = 0; i <= std::numeric_limits<uint16>::max(); ++i) {
       char buffer[sizeof(uint32)];
       writeu32(buffer, i);
@@ -565,7 +574,7 @@ static int unit_tests(int argc, char *argv[])
          assert(value == readu32(buffer));
       }
    }
-#endif
+   #endif
    streamsize start, stop;
    if (argc > 2)
    {
@@ -631,8 +640,16 @@ static int unit_tests(int argc, char *argv[])
          assert(0 == out.tellp());
          encode(words, in, out);
 
+   #if FULL_TESTS
+         /* save the encoded data */
+         ostringstream filename;
+         filename << "data/out" << n << ".txt";
+         writeToFile(out, filename.str());
+   #endif
+
          /* prepare and decode */
          out.clear();
+         out.seekg(0);
          assert(0 == out.tellg());
          assert(0 == result.tellp());
          decode(words_rev, out, result);

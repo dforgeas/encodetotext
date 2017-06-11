@@ -1,20 +1,10 @@
-/* Compile with
-cl /EHsc /O2 /Wall /wo4710 /wo4820 encodetotext.cpp
- * or
-g++ -ansi -pedantic -Wall -march=native -O2 -fno-strict-aliasing -o encodetotext cpp/encodetotext.cpp
-*/
-
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <deque>
 #include <queue>
-#ifdef _MSC_VER
 #include <unordered_map>
-#else
-#include <tr1/unordered_map>
-#endif
 #include <utility>
 #include <algorithm>
 #include <functional>
@@ -28,7 +18,6 @@ g++ -ansi -pedantic -Wall -march=native -O2 -fno-strict-aliasing -o encodetotext
 #include "btea.h"
 
 using namespace std;
-using namespace std::tr1;
 
 // + promotes to int, gets the unsigned value even if n is signed
 #define to_byte(n) (+static_cast<unsigned char>(n))

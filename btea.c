@@ -1,8 +1,6 @@
 #define BTEA_EXPORT
 #include "btea.h"
 
-#include <stdio.h>
-
 /* golden number phi = (1 + sqrt(5)) / 2
 2^32 / phi = 0x9e3779b9 */
 #define DELTA 0x9e3779b9

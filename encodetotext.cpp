@@ -22,29 +22,27 @@ using namespace std;
 // + promotes to int, gets the unsigned value even if n is signed
 #define to_byte(n) (+static_cast<unsigned char>(n))
 
-#define STATIC static
-
-STATIC uint32 readu32(const char *buffer)
+static uint32 readu32(const char *buffer)
 {
    uint32 i;
    memcpy(&i, buffer, sizeof i);
    return ntohl(i);
 }
 
-STATIC void writeu32(char *buffer, const uint32 value)
+static void writeu32(char *buffer, const uint32 value)
 {
    const uint32 i = htonl(value);
    memcpy(buffer, &i, sizeof i);
 }
 
-STATIC uint16 readu16(const char *buffer)
+static uint16 readu16(const char *buffer)
 {
    uint16 i;
    memcpy(&i, buffer, sizeof i);
    return ntohs(i);
 }
 
-STATIC void writeu16(char *buffer, const uint16 value)
+static void writeu16(char *buffer, const uint16 value)
 {
    const uint16 i = htons(value);
    memcpy(buffer, &i, sizeof i);
@@ -52,17 +50,16 @@ STATIC void writeu16(char *buffer, const uint16 value)
 
 static uint32 static_key[4] = {3449741923u, 1428823133u, 719882406u, 2957402939u};
 
-#define static_assert(exp) namespace { typedef char static_assert_[(exp) ? 1 : -1]; }
-static_assert(CHAR_BIT == 8);
-static_assert(sizeof(uint16) == 2)
-static_assert(sizeof(uint32) == 4)
+static_assert(CHAR_BIT == 8, "char isn't 8 bits");
+static_assert(sizeof(uint16) == 2, "uint16 isn't 16 bits");
+static_assert(sizeof(uint32) == 4, "uint32 isn't 32 bits");
 
 struct error: exception
 {
    string file, msg, buffer;
-   unsigned long line;
+   streamsize line;
 
-   error (string file, unsigned long line, string msg) throw()
+   error (string file, streamsize line, string msg) throw()
       : file(file), msg(msg), buffer(), line(line)
    {
       set_buffer();
@@ -105,10 +102,11 @@ static void load_static_key()
       {
          throw error(__FILE__, __LINE__, "invalid key");
       }
-      static_key[0] = readu32(buffer);
-      static_key[1] = readu32(buffer + 4);
-      static_key[2] = readu32(buffer + 8);
-      static_key[3] = readu32(buffer + 12);
+
+      for (size_t i = 0; i < sizeof static_key / sizeof *static_key; ++i)
+      {
+         static_key[i] = readu32(buffer + i * sizeof *static_key);
+      }
       cerr << "new key loaded." << endl;
    }
    else
@@ -116,28 +114,6 @@ static void load_static_key()
       cerr << "using the default key." << endl;
    }
 }
-
-template<typename T1, typename T2>
-struct comparable_pair: pair<T1, T2>
-{
-   comparable_pair(const T1 &a1, const T2 &a2): pair<T1, T2>(a1, a2)
-   {
-   }
-
-   bool operator < (const pair<T1, T2> &other) const
-   {
-      return this->first == other.first ?
-         this->second < other.second :
-         this->first < other.first;
-   }
-
-   bool operator > (const pair<T1, T2> &other) const
-   {
-      return this->first == other.first ?
-         this->second > other.second :
-         this->first > other.first;
-   }
-};
 
 static const streamsize BUFFER_SIZE = 4 * sizeof(uint32) << 10; // ensure multiple of sizeof(uint32)
 
@@ -293,7 +269,7 @@ static void decode(const unordered_map<string, uint16> &words_rev, istream &in, 
    string word;
    while (in >> word)
    {
-      unordered_map<string, uint16>::const_iterator words_rev_iter = words_rev.find(word);
+      const auto words_rev_iter = words_rev.find(word);
       if (words_rev_iter == words_rev.end())
       {
          string msg("unexpected word: `");
@@ -390,17 +366,15 @@ static void generate_words(deque<string> &words)
    sort(all_words.begin(), all_words.end(), greater<string>());
 
    { // delete pqueue_words at the end
-      typedef comparable_pair<streamsize, streamsize> elem_t;
+      typedef pair<streamsize, streamsize> elem_t;
       // use greater instead of less to get the lowest elem_t at the top
       priority_queue<elem_t, deque<elem_t>, greater<elem_t> > pqueue_words;
 
       cerr << "filling the size queue..." << endl;
       streamsize i = 0;
-      for (deque<string>::const_iterator iter = all_words.begin()
-          ; iter != all_words.end()
-          ; ++iter)
+      for (const auto &word: all_words)
       { // negate the size to get the largest word at the top
-         pqueue_words.push(elem_t(numeric_limits<streamsize>::max() - iter->size(), i++));
+         pqueue_words.push(elem_t(numeric_limits<streamsize>::max() - word.size(), i++));
       }
 
       cerr << "deleting the longest words..." << endl;
@@ -412,12 +386,10 @@ static void generate_words(deque<string> &words)
    } // delete pqueue_words
 
    cerr << "creating the word list..." << endl;
-   for (deque<string>::const_iterator iter = all_words.begin()
-       ; iter != all_words.end()
-       ; ++iter)
+   for (const auto &word: all_words)
    {
-      if ( ! iter->empty())
-         words.push_back(*iter);
+      if (not word.empty())
+         words.push_back(word);
    }
 
    if (words.size() != 1 << 16)
@@ -454,11 +426,9 @@ static bool quick_start(deque<string> &words)
 static void save_words(const deque<string> &words)
 {
    ofstream sorted_words_file("words.quickstart");
-   for (deque<string>::const_iterator iter = words.begin()
-       ; iter != words.end()
-       ; ++iter)
+   for (auto &word: words)
    {
-      sorted_words_file << *iter << '\n';
+      sorted_words_file << word << '\n';
    }
 }
 
@@ -466,11 +436,9 @@ static void reverse_words(const deque<string> &words, unordered_map<string, uint
 {
    cerr << "creating the map for the reversal..." << endl;
    uint16 j = 0;
-   for (deque<string>::const_iterator iter = words.begin()
-       ; iter != words.end()
-       ; ++iter)
+   for (auto &word: words)
    {
-      words_rev[*iter] = j++;
+      words_rev[word] = j++;
    }
    assert(j == 0);
 }

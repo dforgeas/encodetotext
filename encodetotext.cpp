@@ -14,6 +14,7 @@
 #include <cstring>
 #include <climits>
 #include <arpa/inet.h>
+#include <ctime>
 
 #include "btea.h"
 
@@ -346,6 +347,8 @@ static bool ends_with(const string& str, const string& end)
 
 static void generate_words(deque<string> &words)
 {
+   std::clock_t startTime(std::clock());
+
    cerr << "opening words.txt..." << endl;
    deque<string> all_words;
    { // delete words_file at the end
@@ -398,6 +401,9 @@ static void generate_words(deque<string> &words)
       msg << "word list size is wrong: " << words.size() << " instead of " << (1 << 16);
       throw error(__FILE__, __LINE__, msg.str());
    }
+
+   std::clock_t duration(std::clock() - startTime);
+   std::cerr << "generate_words in " << (float(duration) / CLOCKS_PER_SEC) << "s." << endl;
 }
 
 static bool quick_start(deque<string> &words)
@@ -425,6 +431,7 @@ static bool quick_start(deque<string> &words)
 
 static void save_words(const deque<string> &words)
 {
+   return; // FIXME: enable again
    ofstream sorted_words_file("words.quickstart");
    for (auto &word: words)
    {

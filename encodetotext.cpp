@@ -3,9 +3,11 @@
 #include <sstream>
 #include <string>
 #include <deque>
+#include <vector>
 #include <queue>
 #include <unordered_map>
 #include <utility>
+#include <iterator>
 #include <algorithm>
 #include <functional>
 #include <cassert>
@@ -347,11 +349,9 @@ static bool ends_with(const string& str, const string& end)
 
 static void generate_words(deque<string> &words)
 {
-   std::clock_t startTime(std::clock());
-
    cerr << "opening words.txt..." << endl;
-   deque<string> all_words;
-   { // delete words_file at the end
+   vector<string> all_words;
+   { // destroy words_file at the end
       ifstream words_file("words.txt");
       if ( ! words_file)
       {
@@ -363,37 +363,27 @@ static void generate_words(deque<string> &words)
          if ( ! line.empty())
             all_words.push_back(line);
       }
-   } // delete words_file
-   cerr << "sorting words..." << endl;
-   // sort in reverse order with greater instead of less
-   sort(all_words.begin(), all_words.end(), greater<string>());
+   } // destroy words_file
 
-   { // delete pqueue_words at the end
-      typedef pair<streamsize, streamsize> elem_t;
-      // use greater instead of less to get the lowest elem_t at the top
-      priority_queue<elem_t, deque<elem_t>, greater<elem_t> > pqueue_words;
+   if (all_words.size() < 1 << 16)
+   {
+      ostringstream msg;
+      msg << "word.txt is too small: " << all_words.size() << " instead of " << (1 << 16);
+      throw error(__FILE__, __LINE__, msg.str());
+   }
 
-      cerr << "filling the size queue..." << endl;
-      streamsize i = 0;
-      for (const auto &word: all_words)
-      { // negate the size to get the largest word at the top
-         pqueue_words.push(elem_t(numeric_limits<streamsize>::max() - word.size(), i++));
-      }
-
-      cerr << "deleting the longest words..." << endl;
-      while (pqueue_words.size() > 1 << 16)
+   cerr << "sorting the smallest words of the list..." << endl;
+   partial_sort(all_words.begin(), all_words.begin() + (1 << 16), all_words.end(),
+      [](const string& a, const string& b)
       {
-         all_words[pqueue_words.top().second].clear();
-         pqueue_words.pop();
-      }
-   } // delete pqueue_words
+         const auto la(a.length()), lb(b.length());
+	 if (la < lb) return true;
+	 if (la > lb) return false;
+	 return a < b;
+      });
 
    cerr << "creating the word list..." << endl;
-   for (const auto &word: all_words)
-   {
-      if (not word.empty())
-         words.push_back(word);
-   }
+   copy(all_words.begin(), all_words.begin() + (1 << 16), back_inserter(words));
 
    if (words.size() != 1 << 16)
    {
@@ -401,9 +391,6 @@ static void generate_words(deque<string> &words)
       msg << "word list size is wrong: " << words.size() << " instead of " << (1 << 16);
       throw error(__FILE__, __LINE__, msg.str());
    }
-
-   std::clock_t duration(std::clock() - startTime);
-   std::cerr << "generate_words in " << (float(duration) / CLOCKS_PER_SEC) << "s." << endl;
 }
 
 static bool quick_start(deque<string> &words)
@@ -491,7 +478,13 @@ static int work(int argc, char *argv[])
    deque<string> words;
    if ( ! quick_start(words))
    {
+      std::clock_t startTime(std::clock());
+
       generate_words(words);
+
+      std::clock_t duration(std::clock() - startTime);
+      std::cerr << "generate_words in " << (float(duration) / CLOCKS_PER_SEC) << "s." << endl;
+
       save_words(words);
    }
    load_static_key();

@@ -2,9 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <deque>
 #include <vector>
-#include <queue>
 #include <unordered_map>
 #include <utility>
 #include <iterator>
@@ -162,7 +160,7 @@ static void pad_and_crypt(char *const buffer, streamsize &bytes_read)
    }
 }
 
-static void encode(const deque<string> &words, istream &in, ostream &out)
+static void encode(const vector<string> &words, istream &in, ostream &out)
 {
    streamsize bytes_read;
    char buffer[BUFFER_SIZE];
@@ -347,7 +345,7 @@ static bool ends_with(const string& str, const string& end)
       && end == str.substr(str.size() - end.size());
 }
 
-static void generate_words(deque<string> &words)
+static void generate_words(vector<string> &words)
 {
    cerr << "opening words.txt..." << endl;
    vector<string> all_words;
@@ -383,7 +381,9 @@ static void generate_words(deque<string> &words)
       });
 
    cerr << "creating the word list..." << endl;
-   copy(all_words.begin(), all_words.begin() + (1 << 16), back_inserter(words));
+   all_words.erase(all_words.begin() + (1 << 16), all_words.end());
+   // the memory isn't released but this is fine
+   all_words.swap(words);
 
    if (words.size() != 1 << 16)
    {
@@ -393,7 +393,7 @@ static void generate_words(deque<string> &words)
    }
 }
 
-static bool quick_start(deque<string> &words)
+static bool quick_start(vector<string> &words)
 {
    cerr << "trying to quickstart... " << flush;
    ifstream sorted_words_file("words.quickstart");
@@ -416,7 +416,7 @@ static bool quick_start(deque<string> &words)
    return result;
 }
 
-static void save_words(const deque<string> &words)
+static void save_words(const vector<string> &words)
 {
    return; // FIXME: enable again
    ofstream sorted_words_file("words.quickstart");
@@ -426,7 +426,7 @@ static void save_words(const deque<string> &words)
    }
 }
 
-static void reverse_words(const deque<string> &words, unordered_map<string, uint16> &words_rev)
+static void reverse_words(const vector<string> &words, unordered_map<string, uint16> &words_rev)
 {
    cerr << "creating the map for the reversal..." << endl;
    uint16 j = 0;
@@ -475,7 +475,7 @@ static int work(int argc, char *argv[])
       return 1;
    }
 
-   deque<string> words;
+   vector<string> words;
    if ( ! quick_start(words))
    {
       std::clock_t startTime(std::clock());
@@ -567,7 +567,7 @@ static int unit_tests(int argc, char *argv[])
       return 1;
    }
 
-   deque<string> words;
+   vector<string> words;
    if ( ! quick_start(words))
    {
       generate_words(words);

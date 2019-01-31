@@ -1,4 +1,4 @@
-CFLAGS = -O2 -Wall
+CFLAGS = -O2 -Wall -pipe
 CXXFLAGS = $(CFLAGS) -std=c++11
 
 encode: btea.o encodetotext.o

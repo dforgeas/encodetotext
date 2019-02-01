@@ -420,7 +420,6 @@ static bool quick_start(vector<string> &words)
 
 static void save_words(const vector<string> &words)
 {
-   return; // FIXME: enable again
    ofstream sorted_words_file("words.quickstart");
    for (auto &word: words)
    {

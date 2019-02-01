@@ -370,8 +370,8 @@ static void generate_words(vector<string> &words)
       throw error(__FILE__, __LINE__, msg.str());
    }
 
-   cerr << "sorting the smallest words of the list..." << endl;
-   partial_sort(all_words.begin(), all_words.begin() + (1 << 16), all_words.end(),
+   cerr << "gathering the smallest words of the list..." << endl;
+   nth_element(all_words.begin(), all_words.begin() + (1 << 16), all_words.end(),
       [](const string& a, const string& b)
       {
          const auto la(a.length()), lb(b.length());
@@ -383,6 +383,8 @@ static void generate_words(vector<string> &words)
    cerr << "creating the word list..." << endl;
    all_words.erase(all_words.begin() + (1 << 16), all_words.end());
    // the memory isn't released but this is fine
+
+   sort(all_words.begin(), all_words.end(), greater<string>()); // restore the reverse lexical order of the shortest words
    all_words.swap(words);
 
    if (words.size() != 1 << 16)

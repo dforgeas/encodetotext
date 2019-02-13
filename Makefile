@@ -1,5 +1,5 @@
 CFLAGS = -O2 -Wall -pipe
-CXXFLAGS += $(CFLAGS)
+CXXFLAGS += $(CFLAGS) -std=c++14
 
 encode: btea.o encodetotext.o process.o main.o
 	$(CXX) $(CXXFLAGS) -o $@ $^

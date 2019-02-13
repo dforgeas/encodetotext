@@ -219,7 +219,7 @@ static void remove_padding(ostream &out, const char *const buffer, streamsize da
 invalid_padding:
    ostringstream msg;
    const streamsize padding_size = to_byte(prev_buffer[prev_data_size - 1]);
-   const streamsize begin = std::max(0, prev_data_size - padding_size), end = prev_data_size;
+   const streamsize begin = std::max<streamsize>(0, prev_data_size - padding_size), end = prev_data_size;
    msg << "invalid padding[" << begin << ';' << end << "):" << hex;
    for (auto i = begin; i < end; ++i)
       msg << ' ' << to_byte(prev_buffer[i]);

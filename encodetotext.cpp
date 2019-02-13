@@ -61,7 +61,7 @@ struct error: exception
    streamsize line;
 
    error (string file, streamsize line, string msg) throw()
-      : file(file), msg(msg), buffer(), line(line)
+      : file(std::move(file)), msg(std::move(msg)), buffer(), line(std::move(line))
    {
       set_buffer();
    }
@@ -116,7 +116,7 @@ static void load_static_key()
    }
 }
 
-static const streamsize BUFFER_SIZE = 4 * sizeof(uint32) << 10; // ensure multiple of sizeof(uint32)
+constexpr streamsize BUFFER_SIZE = 4 * sizeof(uint32) << 10; // ensure multiple of sizeof(uint32)
 
 static void pad_and_crypt(char *const buffer, streamsize &bytes_read)
 {
@@ -160,23 +160,22 @@ static void pad_and_crypt(char *const buffer, streamsize &bytes_read)
    }
 }
 
-static void encode(const vector<string> &words, istream &in, ostream &out)
+void encode(const vector<string> &words, istream &in, ostream &out)
 {
-   streamsize bytes_read;
    char buffer[BUFFER_SIZE];
    for ( ; ; )
    {
       in.read(buffer, BUFFER_SIZE); // always read BUFFER_SIZE until EOF
-      bytes_read = in.gcount();
+      streamsize bytes_read = in.gcount();
       pad_and_crypt(buffer, bytes_read); // buffer and bytes_read are updated
-      if (bytes_read == 0) { assert(bytes_read != 0); break; } // never happens because of padding, but the loop will exit on if (!in) break;
+      if (bytes_read == 0) { assert(bytes_read != 0); break; } // never happens because of padding, but the loop will exit below
 
       const streamsize data_size = bytes_read / sizeof(uint16);
       for (streamsize i = 0; i < data_size; ++i) {
          out << words[readu16(buffer + sizeof(uint16) * i)] << ' ';
       }
 
-      if (not in) break;
+      if (not in.good()) break; // break if fail() or eof()
    }
 }
 
@@ -237,14 +236,16 @@ static void remove_padding(ostream &out, const char *const buffer, streamsize da
    { // eof has been hit
       if (prev_data_size > 0)
       {
-         const streamsize padding_size = prev_buffer[prev_data_size - 1];
+         const streamsize padding_size = to_byte(prev_buffer[prev_data_size - 1]);
 
          // check that padding is correct
+         if (padding_size > prev_data_size)
+            goto invalid_padding;
          if (prev_data_size > 8 and (padding_size < 1 or padding_size > 4)
             or (padding_size < 1 or padding_size > 8))
             goto invalid_padding;
-         for (streamsize current = prev_data_size - 2; current > prev_data_size - padding_size; --current)
-            if (prev_buffer[current] != static_cast<char>(padding_size))
+         for (auto i = prev_data_size - 2; i >= prev_data_size - padding_size; --i)
+            if (to_byte(prev_buffer[i]) != padding_size)
                goto invalid_padding;
 
          // output except the padding
@@ -259,9 +260,11 @@ static void remove_padding(ostream &out, const char *const buffer, streamsize da
 
 invalid_padding:
    ostringstream msg;
-   msg << "invalid padding: " << hex << to_byte(prev_buffer[prev_data_size-4])
-      << ' ' << to_byte(prev_buffer[prev_data_size-3])
-      << ' ' << to_byte(prev_buffer[prev_data_size-2]) << ' ' << to_byte(prev_buffer[prev_data_size-1]);
+   const streamsize padding_size = to_byte(prev_buffer[prev_data_size - 1]);
+   const streamsize begin = std::max(0, prev_data_size - padding_size), end = prev_data_size;
+   msg << "invalid padding[" << begin << ';' << end << "):" << hex;
+   for (auto i = begin; i < end; ++i)
+      msg << ' ' << to_byte(prev_buffer[i]);
    throw error(__FILE__, __LINE__, msg.str());
 }
 

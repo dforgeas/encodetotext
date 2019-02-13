@@ -1,27 +1,26 @@
+#include "btea.h"
+#include "encodetotext.hpp"
+
 #include <iostream>
 #include <fstream>
-#include <sstream>
-#include <string>
-#include <vector>
-#include <unordered_map>
 #include <utility>
 #include <iterator>
 #include <algorithm>
 #include <functional>
 #include <cassert>
-#include <exception>
 #include <limits>
 #include <cstring>
 #include <climits>
 #include <arpa/inet.h>
-#include <ctime>
-
-#include "btea.h"
 
 using namespace std;
 
 // + promotes to int, gets the unsigned value even if n is signed
 #define to_byte(n) (+static_cast<unsigned char>(n))
+
+static_assert(CHAR_BIT == 8, "char isn't 8 bits");
+static_assert(sizeof(uint16_t) == 2, "uint16_t isn't 16 bits");
+static_assert(sizeof(uint32) == 4, "uint32 isn't 32 bits");
 
 static uint32 readu32(const char *buffer)
 {
@@ -36,63 +35,22 @@ static void writeu32(char *buffer, const uint32 value)
    memcpy(buffer, &i, sizeof i);
 }
 
-static uint16 readu16(const char *buffer)
+static uint16_t readu16(const char *buffer)
 {
-   uint16 i;
+   uint16_t i;
    memcpy(&i, buffer, sizeof i);
    return ntohs(i);
 }
 
-static void writeu16(char *buffer, const uint16 value)
+static void writeu16(char *buffer, const uint16_t value)
 {
-   const uint16 i = htons(value);
+   const uint16_t i = htons(value);
    memcpy(buffer, &i, sizeof i);
 }
 
 static uint32 static_key[4] = {3449741923u, 1428823133u, 719882406u, 2957402939u};
 
-static_assert(CHAR_BIT == 8, "char isn't 8 bits");
-static_assert(sizeof(uint16) == 2, "uint16 isn't 16 bits");
-static_assert(sizeof(uint32) == 4, "uint32 isn't 32 bits");
-
-struct error: exception
-{
-   string file, msg, buffer;
-   streamsize line;
-
-   error (string file, streamsize line, string msg) throw()
-      : file(std::move(file)), msg(std::move(msg)), buffer(), line(std::move(line))
-   {
-      set_buffer();
-   }
-   error (const error& exc) throw()
-      : file(exc.file), msg(exc.msg), buffer(), line(exc.line)
-   {
-      set_buffer();
-   }
-   error& operator= (const error& exc) throw()
-   {
-      file = exc.file;
-      line = exc.line;
-      msg = exc.msg;
-      set_buffer();
-      return *this;
-   }
-   virtual ~error() throw()
-   {}
-   virtual void set_buffer() throw()
-   {
-      ostringstream out;
-      out << '(' << file << ':' << line << ") " << msg;
-      buffer = out.str();
-   }
-   virtual const char* what() const throw()
-   {
-      return buffer.c_str();
-   }
-};
-
-static void load_static_key()
+void load_static_key()
 {
    ifstream in("encode.key", ios::in | ios::binary);
    if (in)
@@ -170,9 +128,9 @@ void encode(const vector<string> &words, istream &in, ostream &out)
       pad_and_crypt(buffer, bytes_read); // buffer and bytes_read are updated
       if (bytes_read == 0) { assert(bytes_read != 0); break; } // never happens because of padding, but the loop will exit below
 
-      const streamsize data_size = bytes_read / sizeof(uint16);
+      const streamsize data_size = bytes_read / sizeof(uint16_t);
       for (streamsize i = 0; i < data_size; ++i) {
-         out << words[readu16(buffer + sizeof(uint16) * i)] << ' ';
+         out << words[readu16(buffer + sizeof(uint16_t) * i)] << ' ';
       }
 
       if (not in.good()) break; // break if fail() or eof()
@@ -189,7 +147,7 @@ namespace buff_option
    };
 }
 
-static char *bufferise_data(const uint16 data, buff_option::e option = buff_option::nothing)
+static char *bufferise_data(const uint16_t data, buff_option::e option = buff_option::nothing)
 {
    static char buffer[BUFFER_SIZE];
    static streamsize data_size = 0;
@@ -268,7 +226,7 @@ invalid_padding:
    throw error(__FILE__, __LINE__, msg.str());
 }
 
-static void decode(const unordered_map<string, uint16> &words_rev, istream &in, ostream &out)
+void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostream &out)
 {
    string word;
    while (in >> word)
@@ -342,13 +300,7 @@ static void decode(const unordered_map<string, uint16> &words_rev, istream &in, 
    remove_padding(out, pbuffer, 0); // flush any bufferised data
 }
 
-static bool ends_with(const string& str, const string& end)
-{
-   return end.size() <= str.size()
-      && end == str.substr(str.size() - end.size());
-}
-
-static void generate_words(vector<string> &words)
+void generate_words(vector<string> &words)
 {
    cerr << "opening words.txt..." << endl;
    vector<string> all_words;
@@ -398,7 +350,7 @@ static void generate_words(vector<string> &words)
    }
 }
 
-static bool quick_start(vector<string> &words)
+bool quick_start(vector<string> &words)
 {
    cerr << "trying to quickstart... " << flush;
    ifstream sorted_words_file("words.quickstart");
@@ -421,7 +373,7 @@ static bool quick_start(vector<string> &words)
    return result;
 }
 
-static void save_words(const vector<string> &words)
+void save_words(const vector<string> &words)
 {
    ofstream sorted_words_file("words.quickstart");
    for (auto &word: words)
@@ -430,232 +382,13 @@ static void save_words(const vector<string> &words)
    }
 }
 
-static void reverse_words(const vector<string> &words, unordered_map<string, uint16> &words_rev)
+void reverse_words(const vector<string> &words, unordered_map<string, uint16_t> &words_rev)
 {
    cerr << "creating the map for the reversal..." << endl;
-   uint16 j = 0;
+   uint16_t j = 0;
    for (auto &word: words)
    {
       words_rev[word] = j++;
    }
    assert(j == 0);
-}
-
-#ifndef UNIT_TESTS
-static int work(int argc, char *argv[])
-{
-   string mode;
-   ifstream in;
-   ofstream out;
-   if (argc > 3)
-   {
-      mode = argv[1];
-      if (mode != "enc" && mode != "dec")
-      {
-         cerr << "invalid mode " << mode << " ; valid is enc or dec\n";
-         return 2;
-      }
-      if (ends_with(argv[3], "words.txt"))
-      { // basic protection of not overwriting our database
-         cerr << "cannot use words.txt as filename\n";
-         return 4;
-      }
-      in.open(argv[2], ios::in | ios::binary);
-      out.open(argv[3], ios::out | ios::binary);
-      if (!in)
-      {
-         cerr << "error opening " << argv[2] << '\n';
-         return 3;
-      }
-      if (!out)
-      {
-         cerr << "error opening " << argv[3] << '\n';
-         return 4;
-      }
-   }
-   else
-   {
-      cerr << "missing parameters: mode {enc, dec}, filename_in, filename_out\n";
-      return 1;
-   }
-
-   vector<string> words;
-   if ( ! quick_start(words))
-   {
-      std::clock_t startTime(std::clock());
-
-      generate_words(words);
-
-      std::clock_t duration(std::clock() - startTime);
-      std::cerr << "generate_words in " << (float(duration) / CLOCKS_PER_SEC) << "s." << endl;
-
-      save_words(words);
-   }
-   load_static_key();
-
-   if (mode == "enc")
-   {
-      cerr << "encoding the file..." << endl;
-      encode(words, in, out);
-   }
-   else
-   {
-      unordered_map<string, uint16> words_rev;
-      reverse_words(words, words_rev);
-
-      cerr << "decoding the file..." << endl;
-      decode(words_rev, in, out);
-   }
-
-   return 0;
-}
-
-#else // UNIT_TESTS
-   #if FULL_TESTS
-static void writeToFile(istream& data, const string& filename)
-{
-   ofstream out(filename.c_str(), std::ios::binary);
-   assert(out.is_open());
-   out << data.rdbuf(); // this just copies everything
-}
-   #endif
-
-static int unit_tests(int argc, char *argv[])
-{
-   #if FULL_TESTS
-   for (uint32 i = 0; i <= std::numeric_limits<uint16>::max(); ++i) {
-      char buffer[sizeof(uint32)];
-      writeu32(buffer, i);
-      assert(i == readu32(buffer));
-      writeu16(buffer, i);
-      assert(i == readu16(buffer));
-      for (uint32 j = 0; j < std::numeric_limits<uint16>::max(); ++j) {
-         const uint32 value = i << 16 | j;
-         writeu32(buffer, value);
-         assert(value == readu32(buffer));
-      }
-   }
-   #endif
-   streamsize start, stop;
-   if (argc > 2)
-   {
-      {
-         istringstream read_start(argv[1]);
-         read_start >> start;
-         if (read_start.fail())
-         {
-            cerr << "parameter start must be a number\n";
-            return 2;
-         }
-      }
-
-      {
-         istringstream read_stop(argv[2]);
-         read_stop >> stop;
-         if (read_stop.fail())
-         {
-            cerr << "parameter stop must be a number\n";
-            return 3;
-         }
-      }
-
-      if (start >= stop)
-      {
-         cerr << "start must be less than stop\n";
-         return 4;
-      }
-   }
-   else
-   {
-      cerr << "missing parameters: start, stop\n";
-      return 1;
-   }
-
-   vector<string> words;
-   if ( ! quick_start(words))
-   {
-      generate_words(words);
-      save_words(words);
-   }
-   load_static_key();
-
-   unordered_map<string, uint16> words_rev;
-   reverse_words(words, words_rev);
-
-   cerr << "starting tests..."<< endl;
-   vector<bool> results(stop - start);
-
-   for (streamsize n = start; n < stop; ++n)
-   { // test for size n
-      stringstream in, out, result("!"); // impossible result because in starts with 'a'
-      for (streamsize i = 0; i < n; ++i)
-      {
-         in << static_cast<char>(i + 'a');
-      }
-
-      try
-      {
-         /* prepare and encode */
-         in.clear();
-         assert(0 == in.tellg());
-         assert(0 == out.tellp());
-         encode(words, in, out);
-
-   #if FULL_TESTS
-         /* save the encoded data */
-         ostringstream filename;
-         filename << "data/out" << n << ".txt";
-         writeToFile(out, filename.str());
-   #endif
-
-         /* prepare and decode */
-         out.clear();
-         out.seekg(0);
-         assert(0 == out.tellg());
-         assert(0 == result.tellp());
-         decode(words_rev, out, result);
-      }
-      catch (const exception& exc)
-      {
-        cerr << "error (#" << n << "): " << exc.what() << endl;
-      } // catch any exception but allow other tests to run
-
-      results[n - start] = in.str() == result.str();
-   }
-
-   /* display the results */
-   streamsize total = 0, failed = 0;
-   cout << "\nFAILED: ";
-   for (vector<bool>::const_iterator it = results.begin()
-       ; it != results.end()
-       ; ++it)
-   {
-      ++total;
-      if ( ! *it)
-      {
-         ++failed;
-         cout << (start + (it - results.begin())) << ' ';
-      }
-   }
-   cout << '\n';
-   cout << "failed " << (failed * 100 / total) << "%\n";
-   return 0;
-}
-#endif
-
-int main(int argc, char *argv[])
-{
-   try
-   {
-   #ifndef UNIT_TESTS
-      return work(argc, argv);
-   #else
-      return unit_tests(argc, argv);
-   #endif
-   }
-   catch (const exception& exc)
-   {
-      cerr << "error: " << exc.what() << endl;
-      return 0xf;
-   }
 }

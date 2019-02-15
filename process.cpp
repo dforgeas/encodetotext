@@ -4,10 +4,12 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <experimental/string_view>
 
 using namespace std;
+using string_view = experimental::string_view;
 
-static bool ends_with(const string& str, const string& end)
+static bool ends_with(const string_view str, const string_view end)
 {
    return end.size() <= str.size()
       && end == str.substr(str.size() - end.size());
@@ -15,7 +17,7 @@ static bool ends_with(const string& str, const string& end)
 
 static int process(int argc, char *argv[])
 {
-   string mode;
+   string_view mode;
    ifstream in;
    ofstream out;
    if (argc > 3)

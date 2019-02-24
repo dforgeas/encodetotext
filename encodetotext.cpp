@@ -1,5 +1,5 @@
-#include "btea.h"
 #include "encodetotext.hpp"
+#include "crypto.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -74,7 +74,7 @@ void load_static_key()
    }
 }
 
-constexpr streamsize BUFFER_SIZE = 4 * sizeof(uint32) << 10; // ensure multiple of sizeof(uint32)
+constexpr streamsize BUFFER_SIZE = CbcMac::stateSize * sizeof(uint32) << 10; // ensure multiple of sizeof(uint32) and CbcMac::stateSize
 
 static void pad_and_crypt(char *const buffer, streamsize &bytes_read)
 {
@@ -137,58 +137,48 @@ void encode(const vector<string> &words, istream &in, ostream &out)
    }
 }
 
-namespace buff_option
+class Buffers
 {
-   enum e
-   {
-      nothing,
-      eof,
-      size
-   };
-}
+   char data[2][BUFFER_SIZE] = {};
+   streamsize sizes[2] = {};
+   bool current = false;
+public:
+   void flip() { current = not current; }
+   char *first() { return data[current]; }
+   char *second() { return data[not current]; }
+   streamsize& firstSize() { return sizes[current]; }
+   streamsize& secondSize() { return sizes[not current]; }
+};
 
-static char *bufferise_data(const uint16_t data, buff_option::e option = buff_option::nothing)
+static char *bufferise_data(Buffers &buffers, const uint16_t data)
 {
-   static char buffer[BUFFER_SIZE];
-   static streamsize data_size = 0;
-   // although quite fun, this function would better be a class
-   switch (option)
+   streamsize& data_size = buffers.firstSize();
+   writeu16(buffers.first() + data_size, data);
+   data_size += sizeof data;
+   if (data_size == BUFFER_SIZE)
    {
-   case buff_option::nothing:
-      writeu16(buffer + data_size, data);
-      data_size += sizeof data;
-      assert(data_size <= BUFFER_SIZE);
-      if (data_size == BUFFER_SIZE)
-      {
-         data_size = 0;
-         return buffer; // a buffer full of data is available
-      }
-      else
-         return 0; // more data expected
-   case buff_option::eof:
-      data_size = 0; // reset for the next time
-      return buffer; // the buffer may not be full on eof
-   case buff_option::size:
-      return reinterpret_cast<char *>(&data_size);
-   default:
-      assert(false);
-      return 0;
+      return buffers.first(); // a buffer full of data is available
+   }
+   else
+   {
+      return 0; // more data expected
    }
 }
 
-static void remove_padding(ostream &out, const char *const buffer, streamsize data_size)
+static void remove_padding(Buffers &buffers, ostream &out)
 {
-   static char prev_buffer[BUFFER_SIZE];
-   static streamsize prev_data_size = 0;
-   if (data_size > 0)
+   const char *const prev_buffer = buffers.second();
+   streamsize &prev_data_size = buffers.secondSize();
+   if (buffers.firstSize() > 0)
    { // data is available on input
       if (prev_data_size > 0)
       { // normal operation, output previous buffer
          out.write(prev_buffer, prev_data_size);
+         prev_data_size = 0;
       }
-      // and save the current
-      memcpy(prev_buffer, buffer, data_size);
-      prev_data_size = data_size;
+      // and save the current buffer
+      buffers.flip(); // invalidates prev_buffer and prev_data_size
+      return;
    }
    else
    { // eof has been hit
@@ -212,9 +202,8 @@ static void remove_padding(ostream &out, const char *const buffer, streamsize da
          prev_data_size = 0;
       }
       // else out will be empty because no data
+      return;
    }
-
-   return;
 
 invalid_padding:
    ostringstream msg;
@@ -228,6 +217,7 @@ invalid_padding:
 
 void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostream &out)
 {
+   Buffers buffers;
    string word;
    while (in >> word)
    {
@@ -239,7 +229,7 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
          throw error(__FILE__, __LINE__, msg);
       }
       char *pbuffer;
-      if (0 != (pbuffer = bufferise_data(words_rev_iter->second)))
+      if (0 != (pbuffer = bufferise_data(buffers, words_rev_iter->second)))
       { // the buffer is full, process it without padding
 
          // convert to native integers
@@ -262,13 +252,13 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
          for (streamsize i = 0; i < data_size; ++i) {
             writeu32(pbuffer + sizeof(uint32) * i, native_buffer[i]);
          }
-         remove_padding(out, pbuffer, BUFFER_SIZE);
+         remove_padding(buffers, out);
       }
    }
 
    // special case for the last block, which may be partial
-   const streamsize data_size = *reinterpret_cast<streamsize *>(bufferise_data(0, buff_option::size));
-   char *pbuffer = bufferise_data(0, buff_option::eof);
+   const streamsize data_size = buffers.firstSize();
+   char *const pbuffer = buffers.first();
 
    // when the previous block ends on a block boundary, there may be no data left
    if (data_size > 0)
@@ -294,10 +284,10 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
          writeu32(pbuffer + sizeof(uint32) * i, native_buffer[i]);
       }
 
-      remove_padding(out, pbuffer, data_size);
+      remove_padding(buffers, out);
    }
 
-   remove_padding(out, pbuffer, 0); // flush any bufferised data
+   remove_padding(buffers, out); // flush any buffered data
 }
 
 void generate_words(vector<string> &words)
@@ -330,9 +320,9 @@ void generate_words(vector<string> &words)
       [](const string& a, const string& b)
       {
          const auto la(a.length()), lb(b.length());
-	 if (la < lb) return true;
-	 if (la > lb) return false;
-	 return a < b;
+         if (la < lb) return true;
+         if (la > lb) return false;
+         return a < b;
       });
 
    cerr << "creating the word list..." << endl;

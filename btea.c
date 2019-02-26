@@ -11,7 +11,7 @@ BOOL CALLCONV btea(uint32 *v, int n, uint32 const key[4]) {
 	uint32 y, z, sum;
 	unsigned p, rounds, e;
 	if (n > 1) {          /* Coding Part */
-	  rounds = 2*6 + 2*52/n;
+	  rounds = 8 + 69/n; // 33% harder than the stock algorithm
 	  sum = 0;
 	  z = v[n-1];
 	  do {
@@ -27,7 +27,7 @@ BOOL CALLCONV btea(uint32 *v, int n, uint32 const key[4]) {
 	  return TRUE;
 	} else if (n < -1) {  /* Decoding Part */
 	  n = -n;
-	  rounds = 2*6 + 2*52/n;
+	  rounds = 8 + 69/n;
 	  sum = rounds*DELTA;
 	  y = v[0];
 	  do {

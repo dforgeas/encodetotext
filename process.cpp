@@ -1,13 +1,12 @@
 #include "encodetotext.hpp"
+#include "make_key.hpp"
 
 #include <ctime>
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <experimental/string_view>
 
 using namespace std;
-using string_view = experimental::string_view;
 
 static bool ends_with(const string_view str, const string_view end)
 {
@@ -20,21 +19,37 @@ static int process(int argc, char *argv[])
    string_view mode;
    ifstream in;
    ofstream out;
-   if (argc > 3)
+   if (argc > 1)
    {
       mode = argv[1];
-      if (mode != "enc" && mode != "dec")
+      if (mode != "enc" && mode != "dec" && mode != "key")
       {
-         cerr << "invalid mode " << mode << " ; valid is enc or dec\n";
+         cerr << "invalid mode " << mode << " ; valid is enc, dec or key\n";
          return 2;
       }
+
+      if (mode == "key")
+      {
+         if (argc > 3) cerr << "warning: only the first argument is part of the password\n";
+
+         if (argc > 2) return make_key(argv[2]), 0;
+         else return cerr << "missing arguments: mode {key}, password\n", 1;
+         // not reached
+      }
+
+      if (argc <= 3)
+      {
+         cerr << "missing arguments: mode {enc, dec}, filename_in, filename_out\n";
+         return 1;
+      }
+
       if (ends_with(argv[3], "words.txt"))
       { // basic protection of not overwriting our database
          cerr << "cannot use words.txt as filename\n";
          return 4;
       }
-      in.open(argv[2], ios::in | ios::binary);
-      out.open(argv[3], ios::out | ios::binary);
+      in.open(argv[2], ios::binary);
+      out.open(argv[3], ios::binary);
       if (!in)
       {
          cerr << "error opening " << argv[2] << '\n';
@@ -48,7 +63,7 @@ static int process(int argc, char *argv[])
    }
    else
    {
-      cerr << "missing parameters: mode {enc, dec}, filename_in, filename_out\n";
+      cerr << "missing arguments: mode {enc, dec, key}, filename_in or password, [filename_out]\n";
       return 1;
    }
 

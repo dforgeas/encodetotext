@@ -52,7 +52,7 @@ static uint32 static_key[4] = {3449741923u, 1428823133u, 719882406u, 2957402939u
 
 void load_static_key()
 {
-   ifstream in("encode.key", ios::in | ios::binary);
+   ifstream in("encode.key", ios::binary);
    if (in)
    {
       char buffer[sizeof static_key];
@@ -66,17 +66,35 @@ void load_static_key()
       {
          static_key[i] = readu32(buffer + i * sizeof *static_key);
       }
-      cerr << "new key loaded." << endl;
+      clog << "new key loaded." << endl;
    }
    else
    {
-      cerr << "using the default key." << endl;
+      clog << "using the default key." << endl;
    }
 }
 
 constexpr streamsize BUFFER_SIZE = CbcMac::stateSize * sizeof(uint32) << 10; // ensure multiple of sizeof(uint32) and CbcMac::stateSize
+constexpr streamsize NATIVE_BUFFER_SIZE = BUFFER_SIZE / sizeof(uint32);
 
-static void pad_and_crypt(char *const buffer, streamsize &bytes_read)
+static void mac_process_buffer(uint32 *const native_buffer, const streamsize size, CbcMac &mac)
+{
+   streamsize i = 0;
+   for (i = 0; i < size - CbcMac::stateSize; i += CbcMac::stateSize)
+   {
+      mac.update(reinterpret_cast<uint32 const (&)[CbcMac::stateSize]>(native_buffer[i]));
+   }
+
+   // update last (potentially partial) block
+   uint32 mac_buffer[CbcMac::stateSize] = {};
+   for (auto p = mac_buffer; i < size; ++i)
+   {
+      *p++ = native_buffer[i];
+   }
+   mac.update(mac_buffer);
+}
+
+static void pad_and_crypt(char *const buffer, streamsize &bytes_read, CbcMac &mac)
 {
    // pad if necessary
    if (bytes_read < BUFFER_SIZE)
@@ -96,9 +114,8 @@ static void pad_and_crypt(char *const buffer, streamsize &bytes_read)
    }
 
    // convert to native integers
-   const streamsize native_buffer_size = BUFFER_SIZE / sizeof(uint32);
    const streamsize data_size = bytes_read / sizeof(uint32);
-   uint32 native_buffer[native_buffer_size];
+   uint32 native_buffer[NATIVE_BUFFER_SIZE];
    for (streamsize i = 0; i < data_size; ++i) {
       native_buffer[i] = readu32(buffer + sizeof(uint32) * i);
    }
@@ -112,6 +129,9 @@ static void pad_and_crypt(char *const buffer, streamsize &bytes_read)
       throw error(__FILE__, __LINE__, msg.str());
    }
 
+   // update mac with encrypted data
+   mac_process_buffer(native_buffer, data_size, mac);
+
    // convert back to bytes
    for (streamsize i = 0; i < data_size; ++i) {
       writeu32(buffer + sizeof(uint32) * i, native_buffer[i]);
@@ -120,20 +140,31 @@ static void pad_and_crypt(char *const buffer, streamsize &bytes_read)
 
 void encode(const vector<string> &words, istream &in, ostream &out)
 {
+   CbcMac mac(static_key);
    char buffer[BUFFER_SIZE];
    for ( ; ; )
    {
       in.read(buffer, BUFFER_SIZE); // always read BUFFER_SIZE until EOF
       streamsize bytes_read = in.gcount();
-      pad_and_crypt(buffer, bytes_read); // buffer and bytes_read are updated
+      pad_and_crypt(buffer, bytes_read, mac); // buffer, bytes_read and mac are updated
       if (bytes_read == 0) { assert(bytes_read != 0); break; } // never happens because of padding, but the loop will exit below
 
       const streamsize data_size = bytes_read / sizeof(uint16_t);
       for (streamsize i = 0; i < data_size; ++i) {
-         out << words[readu16(buffer + sizeof(uint16_t) * i)] << ' ';
+         out << words[readu16(buffer + sizeof(uint16_t) * i)]
+             << (i % 8 != 7 ? ' ' : '\n'); // the new line is cosmetic
       }
 
       if (not in.good()) break; // break if fail() or eof()
+   }
+
+   // write the CbcMac as words
+   out << "\n# "; // the new line is cosmetic, the pound is meaningful in the format
+   for (uint32 const x: mac.finish())
+   {
+      char temp[sizeof x];
+      writeu32(temp, x);
+      out << words[readu16(temp)] << ' ' << words[readu16(temp + sizeof(uint16_t))] << ' ';
    }
 }
 
@@ -217,6 +248,7 @@ invalid_padding:
 
 void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostream &out)
 {
+   CbcMac mac(static_key);
    Buffers buffers;
    string word;
    while (in >> word)
@@ -224,13 +256,22 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
       const auto words_rev_iter = words_rev.find(word);
       if (words_rev_iter == words_rev.end())
       {
-         string msg("unexpected word: `");
-         msg += word + '\'';
-         throw error(__FILE__, __LINE__, msg);
+         if (word == "#")
+         { // found the marker between the data and the MAC
+            // TODO: we need to process the last block
+            // before verifying the CbcMac
+            goto last_block;
+         }
+         else
+         {
+            string msg("unexpected word: `");
+            msg += word + '\'';
+            throw error(__FILE__, __LINE__, msg);
+         }
       }
       char *pbuffer;
       if (0 != (pbuffer = bufferise_data(buffers, words_rev_iter->second)))
-      { // the buffer is full, process it without padding
+      { // the buffer is full
 
          // convert to native integers
          const streamsize data_size = BUFFER_SIZE / sizeof(uint32);
@@ -238,6 +279,9 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
          for (streamsize i = 0; i < data_size; ++i) {
             native_buffer[i] = readu32(pbuffer + sizeof(uint32) * i);
          }
+
+         // update mac with encrypted data
+         mac_process_buffer(native_buffer, data_size, mac);
 
          // decrypt
          BOOL btea_result = btea(native_buffer, -data_size, static_key);
@@ -256,6 +300,7 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
       }
    }
 
+last_block:
    // special case for the last block, which may be partial
    const streamsize data_size = buffers.firstSize();
    char *const pbuffer = buffers.first();
@@ -264,13 +309,16 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
    if (data_size > 0)
    {
       // convert to native integers
-      const streamsize native_buffer_size = BUFFER_SIZE / sizeof(uint32);
       const streamsize contents_size = data_size / sizeof(uint32);
-      uint32 native_buffer[native_buffer_size];
+      uint32 native_buffer[NATIVE_BUFFER_SIZE];
       for (streamsize i = 0; i < contents_size; ++i) {
          native_buffer[i] = readu32(pbuffer + sizeof(uint32) * i);
       }
 
+      // update mac with encrypted data
+      mac_process_buffer(native_buffer, contents_size, mac);
+
+      // decrypt
       BOOL btea_result = btea(native_buffer, -contents_size, static_key);
       if (not btea_result)
       {
@@ -292,7 +340,7 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
 
 void generate_words(vector<string> &words)
 {
-   cerr << "opening words.txt..." << endl;
+   clog << "opening words.txt..." << endl;
    vector<string> all_words;
    { // destroy words_file at the end
       ifstream words_file("words.txt");
@@ -315,7 +363,7 @@ void generate_words(vector<string> &words)
       throw error(__FILE__, __LINE__, msg.str());
    }
 
-   cerr << "gathering the smallest words of the list..." << endl;
+   clog << "gathering the smallest words of the list..." << endl;
    nth_element(all_words.begin(), all_words.begin() + (1 << 16), all_words.end(),
       [](const string& a, const string& b)
       {
@@ -325,7 +373,7 @@ void generate_words(vector<string> &words)
          return a < b;
       });
 
-   cerr << "creating the word list..." << endl;
+   clog << "creating the word list..." << endl;
    all_words.erase(all_words.begin() + (1 << 16), all_words.end());
    // the memory isn't released but this is fine
 
@@ -342,7 +390,7 @@ void generate_words(vector<string> &words)
 
 bool quick_start(vector<string> &words)
 {
-   cerr << "trying to quickstart... " << flush;
+   clog << "trying to quickstart... " << flush;
    ifstream sorted_words_file("words.quickstart");
    string line;
    while (getline(sorted_words_file, line))
@@ -356,10 +404,10 @@ bool quick_start(vector<string> &words)
    if ( ! result) // failure
    {
       words.clear(); // clean before generate_words
-      cerr << "failed\n";
+      clog << "failed\n";
    }
    else
-      cerr << "success\n";
+      clog << "success\n";
    return result;
 }
 
@@ -374,7 +422,8 @@ void save_words(const vector<string> &words)
 
 void reverse_words(const vector<string> &words, unordered_map<string, uint16_t> &words_rev)
 {
-   cerr << "creating the map for the reversal..." << endl;
+   clog << "creating the map for the reversal..." << endl;
+   words_rev.reserve(1 << 16);
    uint16_t j = 0;
    for (auto &word: words)
    {

@@ -1,5 +1,7 @@
 #include "btea.h"
 
+#include <algorithm>
+
 namespace detail {
 
 template <int N>
@@ -38,14 +40,18 @@ public:
 		btea(state, stateSize, k1);
 	}
 
-	uint32 const (&finish())[stateSize]
-	{
-		btea(state, stateSize, k2);
-		return state;
+	uint32 const (& digest() const)[stateSize]
+	{ // computes the digest with a copy of the state so that
+	  // you may still call update next
+
+		std::copy(&state[0], &state[stateSize], state2);
+		btea(state2, stateSize, k2);
+		return state2;
 	}
 
 private:
 	uint32 k1[4];
 	uint32 k2[4];
 	uint32 state[stateSize] = {};
+	mutable uint32 state2[stateSize];
 };

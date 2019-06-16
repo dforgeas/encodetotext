@@ -21,7 +21,7 @@ void make_key(const string_view password)
 		mac.update(buffer);
 	}
 
-	const auto key = mac.finish();
+	const auto key = mac.digest();
 	std::ofstream out("encode.key", std::ios::binary);
 	for (int i = 0; i < 4; ++i)
 	{

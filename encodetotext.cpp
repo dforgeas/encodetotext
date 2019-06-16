@@ -94,6 +94,16 @@ static void mac_process_buffer(uint32 *const native_buffer, const streamsize siz
    mac.update(mac_buffer);
 }
 
+static void mac_output(const vector<string> &words, const CbcMac &mac, ostream &out)
+{
+   for (uint32 const x: mac.digest())
+   {
+      char temp[sizeof x];
+      writeu32(temp, x);
+      out << words[readu16(temp)] << ' ' << words[readu16(temp + sizeof(uint16_t))] << ' ';
+   }
+}
+
 static void pad_and_crypt(char *const buffer, streamsize &bytes_read, CbcMac &mac)
 {
    // pad if necessary
@@ -142,30 +152,34 @@ void encode(const vector<string> &words, istream &in, ostream &out)
 {
    CbcMac mac(static_key);
    char buffer[BUFFER_SIZE];
+
+   // process the first block separately for the first CbcMac
+   in.read(buffer, BUFFER_SIZE); // always read BUFFER_SIZE until EOF
+   streamsize bytes_read = in.gcount();
+   pad_and_crypt(buffer, bytes_read, mac); // buffer, bytes_read and mac are updated
+
+   mac_output(words, mac, out);
+   out << "%\n"; // the new line is cosmetic, the percent is meaningful in the format
+
    for ( ; ; )
    {
-      in.read(buffer, BUFFER_SIZE); // always read BUFFER_SIZE until EOF
-      streamsize bytes_read = in.gcount();
-      pad_and_crypt(buffer, bytes_read, mac); // buffer, bytes_read and mac are updated
-      if (bytes_read == 0) { assert(bytes_read != 0); break; } // never happens because of padding, but the loop will exit below
-
       const streamsize data_size = bytes_read / sizeof(uint16_t);
       for (streamsize i = 0; i < data_size; ++i) {
          out << words[readu16(buffer + sizeof(uint16_t) * i)]
              << (i % 8 != 7 ? ' ' : '\n'); // the new line is cosmetic
       }
 
+
       if (not in.good()) break; // break if fail() or eof()
+
+      in.read(buffer, BUFFER_SIZE); // always read BUFFER_SIZE until EOF
+      bytes_read = in.gcount();
+      pad_and_crypt(buffer, bytes_read, mac); // buffer, bytes_read and mac are updated
    }
 
    // write the CbcMac as words
-   out << "\n# "; // the new line is cosmetic, the pound is meaningful in the format
-   for (uint32 const x: mac.finish())
-   {
-      char temp[sizeof x];
-      writeu32(temp, x);
-      out << words[readu16(temp)] << ' ' << words[readu16(temp + sizeof(uint16_t))] << ' ';
-   }
+   out << "#\n"; // the new line is cosmetic, the pound is meaningful in the format
+   mac_output(words, mac, out);
 }
 
 class Buffers
@@ -246,11 +260,61 @@ invalid_padding:
    throw error(__FILE__, __LINE__, msg.str());
 }
 
+void check_mac(CbcMac const& mac, const char*const kind, uint16_t (&expectedMac)[sizeof mac.digest() / sizeof(uint16_t)])
+{
+   bool ok = true;
+   size_t e = 0;
+   // check all words in order to avoid timing attacks
+   for (uint32 const x: mac.digest())
+   {
+      char temp[sizeof x];
+      writeu32(temp, x);
+      ok &= readu16(temp) == expectedMac[e++];
+      ok &= readu16(temp + sizeof(uint16_t)) == expectedMac[e++];
+   }
+
+   if (not ok)
+   {
+      string msg("invalid ");
+      msg.append(kind).append(" MAC");
+      throw error(__FILE__, __LINE__, msg);
+   }
+}
+
 void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostream &out)
 {
    CbcMac mac(static_key);
    Buffers buffers;
    string word;
+   uint16_t expectedMac[sizeof mac.digest() / sizeof(uint16_t)] = {};
+   size_t macPos;
+   for (macPos = 0; macPos < sizeof mac.digest() / sizeof(uint16_t); ++macPos)
+   {
+      if (in >> word)
+      {
+         const auto words_rev_iter = words_rev.find(word);
+         if (words_rev_iter == words_rev.end())
+         {
+            string msg("unexpected word during initial MAC: `");
+            msg += word + '\'';
+            throw error(__FILE__, __LINE__, msg);
+         }
+         expectedMac[macPos] = words_rev_iter->second;
+      }
+      else
+      {
+         throw error(__FILE__, __LINE__, "unexpected EOF during initial MAC");
+      }
+   }
+   // check how the initial MAC ends and if it is present
+   if (in >> word and word == "%")
+   { // nothing to do
+   }
+   else
+   {
+      throw error(__FILE__, __LINE__, "expected `%' to terminate the initial MAC");
+   }
+
    while (in >> word)
    {
       const auto words_rev_iter = words_rev.find(word);
@@ -258,8 +322,6 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
       {
          if (word == "#")
          { // found the marker between the data and the MAC
-            // TODO: we need to process the last block
-            // before verifying the CbcMac
             goto last_block;
          }
          else
@@ -282,6 +344,12 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
 
          // update mac with encrypted data
          mac_process_buffer(native_buffer, data_size, mac);
+
+         if (macPos == sizeof expectedMac / sizeof *expectedMac)
+         { // have a complete inital MAC to check
+            check_mac(mac, "initial", expectedMac);
+            macPos = 0; // don't check till the final block and final MAC
+         }
 
          // decrypt
          BOOL btea_result = btea(native_buffer, -data_size, static_key);
@@ -317,6 +385,28 @@ last_block:
 
       // update mac with encrypted data
       mac_process_buffer(native_buffer, contents_size, mac);
+
+      // check the final MAC before finishing
+      // TODO: if (not in.good()) make this optional?
+      for (macPos = 0; macPos < sizeof mac.digest() / sizeof(uint16_t); ++macPos)
+      {
+         if (in >> word)
+         {
+            const auto words_rev_iter = words_rev.find(word);
+            if (words_rev_iter == words_rev.end())
+            {
+               string msg("unexpected word during final MAC: `");
+               msg += word + '\'';
+               throw error(__FILE__, __LINE__, msg);
+            }
+            expectedMac[macPos] = words_rev_iter->second;
+         }
+         else
+         {
+            throw error(__FILE__, __LINE__, "unexpected EOF during final MAC");
+         }
+      }
+      check_mac(mac, "final", expectedMac);
 
       // decrypt
       BOOL btea_result = btea(native_buffer, -contents_size, static_key);

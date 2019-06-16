@@ -159,7 +159,7 @@ void encode(const vector<string> &words, istream &in, ostream &out)
    pad_and_crypt(buffer, bytes_read, mac); // buffer, bytes_read and mac are updated
 
    mac_output(words, mac, out);
-   out << "%\n"; // the new line is cosmetic, the percent is meaningful in the format
+   out << ",\n"; // the new line is cosmetic, the comma is meaningful in the format
 
    for ( ; ; )
    {
@@ -178,7 +178,7 @@ void encode(const vector<string> &words, istream &in, ostream &out)
    }
 
    // write the CbcMac as words
-   out << "#\n"; // the new line is cosmetic, the pound is meaningful in the format
+   out << ".\n"; // the new line is cosmetic, the point is meaningful in the format
    mac_output(words, mac, out);
 }
 
@@ -307,12 +307,12 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
       }
    }
    // check how the initial MAC ends and if it is present
-   if (in >> word and word == "%")
+   if (in >> word and word == ",")
    { // nothing to do
    }
    else
    {
-      throw error(__FILE__, __LINE__, "expected `%' to terminate the initial MAC");
+      throw error(__FILE__, __LINE__, "expected `,' to terminate the initial MAC");
    }
 
    while (in >> word)
@@ -320,7 +320,7 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
       const auto words_rev_iter = words_rev.find(word);
       if (words_rev_iter == words_rev.end())
       {
-         if (word == "#")
+         if (word == ".")
          { // found the marker between the data and the MAC
             goto last_block;
          }

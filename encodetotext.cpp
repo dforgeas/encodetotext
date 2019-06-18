@@ -487,7 +487,7 @@ void generate_words(vector<small_string> &words)
    words.resize(all_words.size());
    for (size_t i = 0; i < all_words.size(); ++i)
    {
-      memcpy(words[i].data(), all_words[i].c_str(), 1 + all_words[i].length());
+      memcpy(words[i].data(), all_words[i].data(), all_words[i].length());
    }
 
    if (words.size() != 1 << 16)

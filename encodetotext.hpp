@@ -45,8 +45,14 @@ struct error: std::exception
    }
 };
 
-struct small_string: std::array<char, 9>
+struct small_string: std::array<char, 8>
 {
+   std::size_t length() const
+   {
+      const char *p = static_cast<const char*>(std::memchr(data(), 0, size()));
+      return p ? p - data() : size();
+   }
+
    bool empty() const
    {
       return operator[](0) == 0;
@@ -54,7 +60,7 @@ struct small_string: std::array<char, 9>
 
    std::string operator + (const char c) const
    {
-      std::string r(data());
+      std::string r(data(), length());
       r += c;
       return r;
    }
@@ -85,12 +91,12 @@ inline std::istream& operator >> (std::istream &in, small_string &s)
    std::string temp;
    if (in >> temp)
    {
-      if (temp.length() + 1 > s.size())
+      if (temp.length() > s.size())
       {
          in.setstate(std::ios::failbit); // string too long
          // set s anyway
       }
-      const auto length = min(s.size() - 1, temp.length());
+      const auto length = min(s.size(), temp.length());
       std::memcpy(s.data(), temp.data(), length);
       std::memset(s.data() + length, 0, s.size() - length);
    }
@@ -99,7 +105,7 @@ inline std::istream& operator >> (std::istream &in, small_string &s)
 
 inline std::ostream& operator << (std::ostream &out, const small_string &s)
 {
-   return out << s.data();
+   return out.write(s.data(), s.length());
 }
 
 namespace std
@@ -110,10 +116,13 @@ namespace std
       typedef std::size_t result_type;
       result_type operator () (const argument_type &s) const
       {
-         std::uint64_t x;
-         static_assert(sizeof x + 1 == sizeof s, "expecting small_string of length 8 maximum");
-         std::memcpy(&x, s.data(), sizeof x); // disregard the null terminator for the hash
-         return std::hash<std::uint64_t>{}(x);
+         result_type h = 0x9e3779b9;
+         for (auto p = s.data(); p - s.data() < s.size() && *p; ++p)
+         {
+            h ^= *p;
+            h = (h << 8) ^ (h >> 24);
+         }
+         return h;
       }
    };
 }

@@ -94,7 +94,7 @@ static void mac_process_buffer(uint32 *const native_buffer, const streamsize siz
    mac.update(mac_buffer);
 }
 
-static void mac_output(const vector<string> &words, const CbcMac &mac, ostream &out)
+static void mac_output(const vector<small_string> &words, const CbcMac &mac, ostream &out)
 {
    for (uint32 const x: mac.digest())
    {
@@ -148,7 +148,7 @@ static void pad_and_crypt(char *const buffer, streamsize &bytes_read, CbcMac &ma
    }
 }
 
-void encode(const vector<string> &words, istream &in, ostream &out)
+void encode(const vector<small_string> &words, istream &in, ostream &out)
 {
    CbcMac mac(static_key);
    char buffer[BUFFER_SIZE];
@@ -281,11 +281,11 @@ void check_mac(CbcMac const& mac, const char*const kind, uint16_t (&expectedMac)
    }
 }
 
-void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostream &out)
+void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in, ostream &out)
 {
    CbcMac mac(static_key);
    Buffers buffers;
-   string word;
+   small_string word;
    uint16_t expectedMac[sizeof mac.digest() / sizeof(uint16_t)] = {};
    size_t macPos;
    for (macPos = 0; macPos < sizeof mac.digest() / sizeof(uint16_t); ++macPos)
@@ -303,7 +303,11 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
       }
       else
       {
-         throw error(__FILE__, __LINE__, "unexpected EOF during initial MAC");
+         string msg("unexpected ");
+         msg += in.eof() ? "EOF" : "word too long `";
+         if (not in.eof()) msg += word + '`';
+         msg += " during initial MAC";
+         throw error(__FILE__, __LINE__, msg);
       }
    }
    // check how the initial MAC ends and if it is present
@@ -368,6 +372,14 @@ void decode(const unordered_map<string, uint16_t> &words_rev, istream &in, ostre
       }
    }
 
+   if (not in.eof())
+   {
+      string msg("unexpected ");
+      msg += "word too long `";
+      msg += word + '`';
+      throw error(__FILE__, __LINE__, msg);
+   }
+
 last_block:
    // special case for the last block, which may be partial
    const streamsize data_size = buffers.firstSize();
@@ -403,7 +415,11 @@ last_block:
          }
          else
          {
-            throw error(__FILE__, __LINE__, "unexpected EOF during final MAC");
+            string msg("unexpected ");
+            msg += in.eof() ? "EOF" : "word too long `";
+            if (not in.eof()) msg += word + '`';
+            msg += " during final MAC";
+            throw error(__FILE__, __LINE__, msg);
          }
       }
       check_mac(mac, "final", expectedMac);
@@ -428,7 +444,7 @@ last_block:
    remove_padding(buffers, out); // flush any buffered data
 }
 
-void generate_words(vector<string> &words)
+void generate_words(vector<small_string> &words)
 {
    clog << "opening words.txt..." << endl;
    vector<string> all_words;
@@ -468,7 +484,11 @@ void generate_words(vector<string> &words)
    // the memory isn't released but this is fine
 
    sort(all_words.begin(), all_words.end(), greater<string>()); // restore the reverse lexical order of the shortest words
-   all_words.swap(words);
+   words.resize(all_words.size());
+   for (size_t i = 0; i < all_words.size(); ++i)
+   {
+      memcpy(words[i].data(), all_words[i].c_str(), 1 + all_words[i].length());
+   }
 
    if (words.size() != 1 << 16)
    {
@@ -478,12 +498,12 @@ void generate_words(vector<string> &words)
    }
 }
 
-bool quick_start(vector<string> &words)
+bool quick_start(vector<small_string> &words)
 {
    clog << "trying to quickstart... " << flush;
    ifstream sorted_words_file("words.quickstart");
-   string line;
-   while (getline(sorted_words_file, line))
+   small_string line;
+   while (sorted_words_file >> line)
    {
       if ( ! line.empty())
          words.push_back(line);
@@ -501,7 +521,7 @@ bool quick_start(vector<string> &words)
    return result;
 }
 
-void save_words(const vector<string> &words)
+void save_words(const vector<small_string> &words)
 {
    ofstream sorted_words_file("words.quickstart");
    for (auto &word: words)
@@ -510,7 +530,7 @@ void save_words(const vector<string> &words)
    }
 }
 
-void reverse_words(const vector<string> &words, unordered_map<string, uint16_t> &words_rev)
+void reverse_words(const vector<small_string> &words, unordered_map<small_string, uint16_t> &words_rev)
 {
    clog << "creating the map for the reversal..." << endl;
    words_rev.reserve(1 << 16);

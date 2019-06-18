@@ -67,7 +67,7 @@ static int process(int argc, char *argv[])
       return 1;
    }
 
-   vector<string> words;
+   vector<small_string> words;
    if ( ! quick_start(words))
    {
       std::clock_t startTime(std::clock());
@@ -88,7 +88,7 @@ static int process(int argc, char *argv[])
    }
    else
    {
-      unordered_map<string, uint16_t> words_rev;
+      unordered_map<small_string, uint16_t> words_rev;
       reverse_words(words, words_rev);
 
       cerr << "decoding the file..." << endl;

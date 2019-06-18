@@ -117,7 +117,7 @@ namespace std
       result_type operator () (const argument_type &s) const
       {
          result_type h = 0x9e3779b9;
-         for (auto p = s.data(); p - s.data() < s.size() && *p; ++p)
+         for (auto p = s.data(); p < s.data() + s.size() && *p; ++p)
          {
             h ^= *p;
             h = (h << 8) ^ (h >> 24);

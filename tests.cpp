@@ -52,7 +52,7 @@ static int unit_tests(int argc, char *argv[])
       return 1;
    }
 
-   vector<string> words;
+   vector<small_string> words;
    if ( ! quick_start(words))
    {
       generate_words(words);
@@ -60,7 +60,7 @@ static int unit_tests(int argc, char *argv[])
    }
    load_static_key();
 
-   unordered_map<string, uint16_t> words_rev;
+   unordered_map<small_string, uint16_t> words_rev;
    reverse_words(words, words_rev);
 
    cerr << "starting tests..."<< endl;

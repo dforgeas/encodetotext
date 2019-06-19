@@ -55,7 +55,7 @@ struct small_string: std::array<char, 8>
 
    bool empty() const
    {
-      return operator[](0) == 0;
+      return front() == 0;
    }
 
    std::string operator + (const char c) const

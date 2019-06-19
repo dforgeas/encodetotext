@@ -120,7 +120,7 @@ namespace std
          for (auto p = s.data(); p < s.data() + s.size() && *p; ++p)
          {
             h ^= *p;
-            h = (h << 8) ^ (h >> 24);
+            h = (h << 7) ^ (h >> 25);
          }
          return h;
       }

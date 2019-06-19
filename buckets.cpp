@@ -1,5 +1,5 @@
 #include"encodetotext.hpp"
-#include<string>
+#include<vector>
 #include<iostream>
 #include<fstream>
 #include<unordered_map>
@@ -8,6 +8,7 @@
 #include<cmath>
 int main()
 {
+	std::ios::sync_with_stdio(false);
 	std::unordered_map<small_string, unsigned short> h;
 	std::ifstream wf("words.quickstart");
 	small_string w;
@@ -18,22 +19,29 @@ int main()
 		h[w] = j++;
 	}
 	assert(j == 0);
-	decltype(h.bucket_count()) max_bucket_size = 0;
-	double sum_sq = 0, sum = 0;
+	std::vector<decltype(h.bucket_size(0))> bucket_sizes;
+	bucket_sizes.reserve(h.bucket_count());
+	double sum_sq = 0;
 	for (decltype(h.bucket_count()) b = 0; b < h.bucket_count(); ++b)
 	{
 		const auto bsize = h.bucket_size(b);
-		max_bucket_size = std::max(max_bucket_size, bsize);
 		sum_sq += double(bsize) * double(bsize);
-		sum += bsize;
-		std::cout << '[' << b << "] " << bsize << ": ";
+		bucket_sizes.push_back(bsize);
+		std::clog << '[' << b << "] " << bsize << ": ";
 		for (auto it = h.cbegin(b); it != h.cend(b); ++it)
 		{
-			std::cout << it->first << '(' << it->second << ") ";
+			std::clog << it->first << '(' << it->second << ") ";
 		}
-		std::cout << '\n';
+		std::clog << '\n';
 	}
-	const double bucket_size_stddev = std::sqrt(sum_sq / h.bucket_count() - (sum / h.bucket_count()) * (sum / h.bucket_count()));
-	std::cout << "\nload_factor: " << h.load_factor() << " ; max: " << h.max_load_factor();
-	std::cout << "\nmax_bucket_size: " << max_bucket_size << " ; stddev: " << bucket_size_stddev << '\n';
+	std::clog << std::flush; // this wouldn't be needed with std::cerr remarquably
+
+	const double bucket_size_stddev = std::sqrt(sum_sq / h.bucket_count() -
+		h.load_factor() * h.load_factor());
+	std::cout << "\nload_factor: " << h.load_factor()
+		<< " ; max: " << h.max_load_factor() << std::endl;
+	std::sort(bucket_sizes.begin(), bucket_sizes.end());
+	std::cout << "max_bucket_size: " << bucket_sizes.back()
+		<< " ; median: " << bucket_sizes[bucket_sizes.size() / 2] // h.bucket_count() is most probably odd
+		<< " ; stddev: " << bucket_size_stddev << '\n';
 }

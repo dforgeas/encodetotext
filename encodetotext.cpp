@@ -281,7 +281,7 @@ void check_mac(CbcMac const& mac, const char*const kind, uint16_t (&expectedMac)
    }
 }
 
-void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in, ostream &out)
+void decode(const vector<small_string> &words, istream &in, ostream &out)
 {
    CbcMac mac(static_key);
    Buffers buffers;
@@ -292,14 +292,14 @@ void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in,
    {
       if (in >> word)
       {
-         const auto words_rev_iter = words_rev.find(word);
-         if (words_rev_iter == words_rev.end())
+         const auto words_iter = std::lower_bound(words.begin(), words.end(), word, greater<small_string>());
+         if (words_iter == words.end() or *words_iter != word)
          {
             string msg("unexpected word during initial MAC: `");
             msg += word + '\'';
             throw error(__FILE__, __LINE__, msg);
          }
-         expectedMac[macPos] = words_rev_iter->second;
+         expectedMac[macPos] = words_iter - words.begin();
       }
       else
       {
@@ -321,8 +321,8 @@ void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in,
 
    while (in >> word)
    {
-      const auto words_rev_iter = words_rev.find(word);
-      if (words_rev_iter == words_rev.end())
+      const auto words_iter = std::lower_bound(words.begin(), words.end(), word, greater<small_string>());
+      if (words_iter == words.end() or *words_iter != word)
       {
          if (word == ".")
          { // found the marker between the data and the MAC
@@ -336,7 +336,7 @@ void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in,
          }
       }
       char *pbuffer;
-      if (0 != (pbuffer = bufferise_data(buffers, words_rev_iter->second)))
+      if (0 != (pbuffer = bufferise_data(buffers, words_iter - words.begin())))
       { // the buffer is full
 
          // convert to native integers
@@ -404,14 +404,14 @@ last_block:
       {
          if (in >> word)
          {
-            const auto words_rev_iter = words_rev.find(word);
-            if (words_rev_iter == words_rev.end())
+            const auto words_iter = std::lower_bound(words.begin(), words.end(), word, greater<small_string>());
+            if (words_iter == words.end() or *words_iter != word)
             {
                string msg("unexpected word during final MAC: `");
                msg += word + '\'';
                throw error(__FILE__, __LINE__, msg);
             }
-            expectedMac[macPos] = words_rev_iter->second;
+            expectedMac[macPos] = words_iter - words.begin();
          }
          else
          {
@@ -528,16 +528,4 @@ void save_words(const vector<small_string> &words)
    {
       sorted_words_file << word << '\n';
    }
-}
-
-void reverse_words(const vector<small_string> &words, unordered_map<small_string, uint16_t> &words_rev)
-{
-   clog << "creating the map for the reversal..." << endl;
-   words_rev.reserve(1 << 16);
-   uint16_t j = 0;
-   for (auto &word: words)
-   {
-      words_rev[word] = j++;
-   }
-   assert(j == 0);
 }

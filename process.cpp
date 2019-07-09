@@ -88,11 +88,8 @@ static int process(int argc, char *argv[])
    }
    else
    {
-      unordered_map<small_string, uint16_t> words_rev;
-      reverse_words(words, words_rev);
-
       cerr << "decoding the file..." << endl;
-      decode(words_rev, in, out);
+      decode(words, in, out);
    }
 
    return 0;

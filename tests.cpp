@@ -60,9 +60,6 @@ static int unit_tests(int argc, char *argv[])
    }
    load_static_key();
 
-   unordered_map<small_string, uint16_t> words_rev;
-   reverse_words(words, words_rev);
-
    cerr << "starting tests..."<< endl;
    vector<bool> results(stop - start);
    int progress = 0;
@@ -97,7 +94,7 @@ static int unit_tests(int argc, char *argv[])
          out.seekg(0);
          assert(0 == out.tellg());
          assert(0 == result.tellp());
-         decode(words_rev, out, result);
+         decode(words, out, result);
       }
       catch (const exception& exc)
       {

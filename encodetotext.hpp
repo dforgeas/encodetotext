@@ -129,8 +129,7 @@ namespace std
 
 void load_static_key();
 void encode(const std::vector<small_string> &words, std::istream &in, std::ostream &out);
-void decode(const std::unordered_map<small_string, std::uint16_t> &words_rev, std::istream &in, std::ostream &out);
+void decode(const std::vector<small_string> &words_rev, std::istream &in, std::ostream &out);
 void generate_words(std::vector<small_string> &words);
 bool quick_start(std::vector<small_string> &words);
 void save_words(const std::vector<small_string> &words);
-void reverse_words(const std::vector<small_string> &words, std::unordered_map<small_string, std::uint16_t> &words_rev);

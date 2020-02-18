@@ -1,5 +1,6 @@
 #include "encodetotext.hpp"
 #include "crypto.hpp"
+#include "queue.hpp"
 
 #include <iostream>
 #include <fstream>

@@ -1,6 +1,8 @@
 btea.o: btea.c btea.h
 bteaex.o: bteaex.cpp btea.h
-encodetotext.o: encodetotext.cpp encodetotext.hpp crypto.hpp btea.h
+buckets.o: buckets.cpp encodetotext.hpp
+encodetotext.o: encodetotext.cpp encodetotext.hpp crypto.hpp btea.h \
+ queue.hpp
 main.o: main.cpp
 make_key.o: make_key.cpp make_key.hpp crypto.hpp btea.h
 process.o: process.cpp encodetotext.hpp make_key.hpp

@@ -44,7 +44,7 @@ public:
 	{ // computes the digest with a copy of the state so that
 	  // you may still call update next
 
-		std::copy(&state[0], &state[stateSize], state2);
+		std::copy(state, state + stateSize, state2);
 		btea(state2, stateSize, k2);
 		return state2;
 	}

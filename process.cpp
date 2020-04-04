@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <cstring>
 
 using namespace std;
 
@@ -17,8 +18,11 @@ static bool ends_with(const string_view str, const string_view end)
 static int process(int argc, char *argv[])
 {
    string_view mode;
-   ifstream in;
-   ofstream out;
+   ifstream file_in;
+   ofstream file_out;
+   istream *in;
+   ostream *out;
+
    if (argc > 1)
    {
       mode = argv[1];
@@ -39,7 +43,7 @@ static int process(int argc, char *argv[])
 
       if (argc <= 3)
       {
-         cerr << "missing arguments: mode {enc, dec}, filename_in, filename_out\n";
+         cerr << "missing arguments: mode {enc, dec}, filename_in(or -), filename_out(or -)\n";
          return 1;
       }
 
@@ -48,14 +52,29 @@ static int process(int argc, char *argv[])
          cerr << "cannot use words.txt as filename\n";
          return 4;
       }
-      in.open(argv[2], ios::binary);
-      out.open(argv[3], ios::binary);
-      if (!in)
+      if (strcmp(argv[2], "-") != 0)
+      {
+         file_in.open(argv[2], ios::binary);
+         in = &file_in;
+      }
+      else
+         in = &cin;
+
+      if (!*in)
       {
          cerr << "error opening " << argv[2] << '\n';
          return 3;
       }
-      if (!out)
+
+      if (strcmp(argv[3], "-") != 0)
+      {
+         file_out.open(argv[3], ios::binary);
+         out = &file_out;
+      }
+      else
+         out = &cout;
+
+      if (!*out)
       {
          cerr << "error opening " << argv[3] << '\n';
          return 4;
@@ -63,7 +82,7 @@ static int process(int argc, char *argv[])
    }
    else
    {
-      cerr << "missing arguments: mode {enc, dec, key}, filename_in or password, [filename_out]\n";
+      cerr << "missing arguments: mode {enc, dec, key}, filename_in(or -) or password, [filename_out(or -)]\n";
       return 1;
    }
 
@@ -84,7 +103,7 @@ static int process(int argc, char *argv[])
    if (mode == "enc")
    {
       cerr << "encoding the file..." << endl;
-      encode(words, in, out);
+      encode(words, *in, *out);
    }
    else
    {
@@ -92,7 +111,7 @@ static int process(int argc, char *argv[])
       reverse_words(words, words_rev);
 
       cerr << "decoding the file..." << endl;
-      decode(words_rev, in, out);
+      decode(words_rev, *in, *out);
    }
 
    return 0;

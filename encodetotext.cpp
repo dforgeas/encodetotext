@@ -180,6 +180,7 @@ void encode(const vector<small_string> &words, istream &in, ostream &out)
    // write the CbcMac as words
    out << ".\n"; // the new line is cosmetic, the point is meaningful in the format
    mac_output(words, mac, out);
+   out << '\n'; // end the file with a new line
 }
 
 class Buffers

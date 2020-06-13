@@ -85,8 +85,8 @@ template <typename T>
 inline T Queue<T>::pop()
 {
 	std::unique_lock<std::mutex> lock(mutex);
-	filled.wait(lock, [this]() { not deck.empty(); });
-	T result = deck.front();
+	filled.wait(lock, [this]() { return not deck.empty(); });
+	T result(std::move(deck.front()));
 	deck.pop_front();
 	lock.unlock(); // avoid waking up push if the lock is taken
 	available.release(); // notify a slot in the queue is now available

@@ -1,11 +1,11 @@
 /* Corrected Block TEA
 http://en.wikipedia.org/wiki/XXTEA */
+#pragma once
+#include <stdint.h>
 
 #ifdef  __cplusplus
 extern "C" {
 #endif
-
-typedef unsigned uint32;
 
 typedef int BOOL;
 #define FALSE 0
@@ -24,7 +24,7 @@ typedef int BOOL;
 #endif
 
 BTEA_API
-BOOL CALLCONV btea(uint32 *v, int n, uint32 const key[4]);
+BOOL CALLCONV btea(uint32_t *v, int n, uint32_t const key[4]);
 
 #ifdef  __cplusplus
 }

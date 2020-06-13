@@ -7,8 +7,8 @@
 #define MX ((z>>5 ^ y<<2) + (y>>3 ^ z<<4)  ^  (sum^y) + (key[(p&3)^e] ^ z))
 
 BTEA_API
-BOOL CALLCONV btea(uint32 *v, int n, uint32 const key[4]) {
-	uint32 y, z, sum;
+BOOL CALLCONV btea(uint32_t *v, int n, uint32_t const key[4]) {
+	uint32_t y, z, sum;
 	unsigned p, rounds, e;
 	if (n > 1) {          /* Coding Part */
 	  rounds = 8 + 69/n; // 33% harder than the stock algorithm

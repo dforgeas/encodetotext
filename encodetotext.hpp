@@ -1,3 +1,4 @@
+#pragma once
 #include <cstdint>
 #include <exception>
 #include <string>
@@ -69,6 +70,11 @@ struct small_string: std::array<char, 8>
    bool operator == (const char (&a)[S]) const
    {
       return std::memcmp(data(), a, S) == 0 && zeroes_from(S);
+   }
+
+   bool operator == (const char c) const
+   {
+      return front() == c and zeroes_from(1);
    }
 
    bool zeroes_from(std::size_t i) const

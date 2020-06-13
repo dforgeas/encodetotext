@@ -17,16 +17,16 @@ std::ostream& printArray(std::ostream& out, const T array[], const size_t length
 
 int main()
 {
-	uint32 data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
-	uint32 key[] = {123, 456, 789, 012};
+	uint32_t data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+	uint32_t key[] = {123, 456, 789, 012};
 
-	printArray<uint32, int>(
-		printArray<uint32, int>(std::cout << "data: ", data, LENGTH(data))
+	printArray<uint32_t, int>(
+		printArray<uint32_t, int>(std::cout << "data: ", data, LENGTH(data))
 			<< "\nkey: ", key, LENGTH(key)
 	) << '\n';
 	btea(data, LENGTH(data), key);
-	printArray<uint32, int>(std::cout << "crypted: ", data, LENGTH(data)) << '\n';
+	printArray<uint32_t, int>(std::cout << "crypted: ", data, LENGTH(data)) << '\n';
 
 	btea(data, -LENGTH(data), key);
-	printArray<uint32, int>(std::cout << "clear: ", data, LENGTH(data)) << '\n';
+	printArray<uint32_t, int>(std::cout << "clear: ", data, LENGTH(data)) << '\n';
 }

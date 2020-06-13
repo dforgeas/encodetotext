@@ -1,6 +1,5 @@
 #include "encodetotext.hpp"
-#include "crypto.hpp"
-#include "queue.hpp"
+#include "macthread.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -20,19 +19,17 @@ using namespace std;
 #define to_byte(n) (+static_cast<unsigned char>(n))
 
 static_assert(CHAR_BIT == 8, "char isn't 8 bits");
-static_assert(sizeof(uint16_t) == 2, "uint16_t isn't 16 bits");
-static_assert(sizeof(uint32) == 4, "uint32 isn't 32 bits");
 
-static uint32 readu32(const char *buffer)
+static uint32_t readu32(const char *buffer)
 {
-   uint32 i;
+   uint32_t i;
    memcpy(&i, buffer, sizeof i);
    return ntohl(i);
 }
 
-static void writeu32(char *buffer, const uint32 value)
+static void writeu32(char *buffer, const uint32_t value)
 {
-   const uint32 i = htonl(value);
+   const uint32_t i = htonl(value);
    memcpy(buffer, &i, sizeof i);
 }
 
@@ -49,7 +46,7 @@ static void writeu16(char *buffer, const uint16_t value)
    memcpy(buffer, &i, sizeof i);
 }
 
-static uint32 static_key[4] = {3449741923u, 1428823133u, 719882406u, 2957402939u};
+static uint32_t static_key[4] = {3449741923u, 1428823133u, 719882406u, 2957402939u};
 
 void load_static_key()
 {
@@ -75,29 +72,13 @@ void load_static_key()
    }
 }
 
-constexpr streamsize BUFFER_SIZE = CbcMac::stateSize * sizeof(uint32) << 10; // ensure multiple of sizeof(uint32) and CbcMac::stateSize
-constexpr streamsize NATIVE_BUFFER_SIZE = BUFFER_SIZE / sizeof(uint32);
-
-static void mac_process_buffer(uint32 *const native_buffer, const streamsize size, CbcMac &mac)
-{
-   streamsize i = 0;
-   for (i = 0; i < size - CbcMac::stateSize; i += CbcMac::stateSize)
-   {
-      mac.update(reinterpret_cast<uint32 const (&)[CbcMac::stateSize]>(native_buffer[i]));
-   }
-
-   // update last (potentially partial) block
-   uint32 mac_buffer[CbcMac::stateSize] = {};
-   for (auto p = mac_buffer; i < size; ++i)
-   {
-      *p++ = native_buffer[i];
-   }
-   mac.update(mac_buffer);
-}
+constexpr streamsize BUFFER_SIZE = CbcMac::stateSize * sizeof(uint32_t) << 10; // ensure multiple of sizeof(uint32_t) and CbcMac::stateSize
+constexpr streamsize NATIVE_BUFFER_SIZE = BUFFER_SIZE / sizeof(uint32_t);
+constexpr streamsize BUFFER_WORDS = BUFFER_SIZE / sizeof(uint16_t);
 
 static void mac_output(const vector<small_string> &words, const CbcMac &mac, ostream &out)
 {
-   for (uint32 const x: mac.digest())
+   for (uint32_t const x: mac.digest())
    {
       char temp[sizeof x];
       writeu32(temp, x);
@@ -105,13 +86,14 @@ static void mac_output(const vector<small_string> &words, const CbcMac &mac, ost
    }
 }
 
-static void pad_and_crypt(char *const buffer, streamsize &bytes_read, CbcMac &mac)
+static void pad_and_crypt(char *const buffer, streamsize &bytes_read,
+   std::function<void(BlockPtr)> updateMac)
 {
    // pad if necessary
    if (bytes_read < BUFFER_SIZE)
    {
-      streamsize nb_chars_to_add = sizeof(uint32) - bytes_read % sizeof(uint32);
-      if (bytes_read < 4) nb_chars_to_add += 4; // special case because 2 uint32 are the minimum for btea
+      streamsize nb_chars_to_add = sizeof(uint32_t) - bytes_read % sizeof(uint32_t);
+      if (bytes_read < 4) nb_chars_to_add += 4; // special case because 2 uint32_t are the minimum for btea
 
       streamsize current = bytes_read;
       bytes_read += nb_chars_to_add;
@@ -125,10 +107,13 @@ static void pad_and_crypt(char *const buffer, streamsize &bytes_read, CbcMac &ma
    }
 
    // convert to native integers
-   const streamsize data_size = bytes_read / sizeof(uint32);
-   uint32 native_buffer[NATIVE_BUFFER_SIZE];
+   const streamsize data_size = bytes_read / sizeof(uint32_t);
+   BlockPtr block(std::make_shared<Block>());
+   block->front() = data_size;
+   uint32_t *const native_buffer = block->data() + 1;
    for (streamsize i = 0; i < data_size; ++i) {
-      native_buffer[i] = readu32(buffer + sizeof(uint32) * i);
+      // TODO: do we need this transformation? or can we just write to native_buffer 2 words=32 bits at a time?
+      native_buffer[i] = readu32(buffer + sizeof(uint32_t) * i);
    }
 
    // crypt
@@ -141,11 +126,11 @@ static void pad_and_crypt(char *const buffer, streamsize &bytes_read, CbcMac &ma
    }
 
    // update mac with encrypted data
-   mac_process_buffer(native_buffer, data_size, mac);
+   updateMac(block);
 
    // convert back to bytes
    for (streamsize i = 0; i < data_size; ++i) {
-      writeu32(buffer + sizeof(uint32) * i, native_buffer[i]);
+      writeu32(buffer + sizeof(uint32_t) * i, native_buffer[i]);
    }
 }
 
@@ -157,11 +142,17 @@ void encode(const vector<small_string> &words, istream &in, ostream &out)
    // process the first block separately for the first CbcMac
    in.read(buffer, BUFFER_SIZE); // always read BUFFER_SIZE until EOF
    streamsize bytes_read = in.gcount();
-   pad_and_crypt(buffer, bytes_read, mac); // buffer, bytes_read and mac are updated
+   pad_and_crypt(buffer, bytes_read,
+      [&mac](BlockPtr block)
+      {
+         mac_process_buffer(*block, mac);
+      }); // buffer, bytes_read and mac are updated
 
    mac_output(words, mac, out);
    out << ",\n"; // the new line is cosmetic, the comma is meaningful in the format
 
+   // start from this mac state and run the rest of the MAC computation in another thread
+   MacThread macThread(mac);
    for ( ; ; )
    {
       const streamsize data_size = bytes_read / sizeof(uint16_t);
@@ -170,17 +161,22 @@ void encode(const vector<small_string> &words, istream &in, ostream &out)
              << (i % 8 != 7 ? ' ' : '\n'); // the new line is cosmetic
       }
 
-
       if (not in.good()) break; // break if fail() or eof()
 
       in.read(buffer, BUFFER_SIZE); // always read BUFFER_SIZE until EOF
       bytes_read = in.gcount();
-      pad_and_crypt(buffer, bytes_read, mac); // buffer, bytes_read and mac are updated
+      pad_and_crypt(buffer, bytes_read,
+         [&macThread](BlockPtr block)
+         {
+            macThread.queue().push(std::move(block));
+         }); // buffer, bytes_read and mac are updated
    }
+   // signal the end of the queue
+   macThread.queue().push(nullptr);
 
    // write the CbcMac as words
    out << ".\n"; // the new line is cosmetic, the point is meaningful in the format
-   mac_output(words, mac, out);
+   mac_output(words, macThread.finish(), out);
    out << '\n'; // end the file with a new line
 }
 
@@ -267,7 +263,7 @@ void check_mac(CbcMac const& mac, const char*const kind, uint16_t (&expectedMac)
    bool ok = true;
    size_t e = 0;
    // check all words in order to avoid timing attacks
-   for (uint32 const x: mac.digest())
+   for (uint32_t const x: mac.digest())
    {
       char temp[sizeof x];
       writeu32(temp, x);
@@ -283,7 +279,121 @@ void check_mac(CbcMac const& mac, const char*const kind, uint16_t (&expectedMac)
    }
 }
 
+struct EndOfBlock: exception
+{
+};
+
+static uint16_t decodeWord(
+   const unordered_map<small_string, uint16_t> &words_rev,
+   istream &in, const char *const context, const char terminator)
+{
+   small_string word;
+   if (in >> word)
+   {
+      const auto words_rev_iter = words_rev.find(word);
+      if (words_rev_iter == words_rev.end())
+      {
+         if (word == terminator)
+         {
+            throw EndOfBlock{};
+         }
+         string msg("unexpected word ");
+         msg.append(context).append(": `").append(word + '\'');
+         throw error(__FILE__, __LINE__, msg);
+      }
+      return words_rev_iter->second;
+   }
+   else
+   {
+      string msg("unexpected ");
+      msg.append(in.eof() ? "EOF" : "word too long `");
+      if (not in.eof()) msg += word + '\'';
+      msg.append(" ").append(context);
+      throw error(__FILE__, __LINE__, msg);
+   }
+}
+
+template <size_t ExpectedMacSize>
+void decodeMAC(
+   const unordered_map<small_string, uint16_t> &words_rev,
+   istream &in, const char *const context,
+   uint16_t (&expectedMac)[ExpectedMacSize], const char terminator)
+{
+   using namespace string_literals;
+   size_t macPos;
+   try
+   {
+      for (macPos = 0; macPos < ExpectedMacSize; ++macPos)
+      {
+         expectedMac[macPos] = decodeWord(words_rev, in, context, terminator);
+      }
+   }
+   catch (EndOfBlock const&)
+   {
+      throw error(__FILE__, __LINE__, "Unexpected terminator "s + context);
+   }
+
+   // check how the MAC ends and if it is present
+   small_string word;
+   if (in >> word and word == terminator)
+   { // nothing to do
+   }
+   else
+   {
+      throw error(__FILE__, __LINE__, "expected a terminator to terminate the MAC "s + context);
+   }
+}
+
+BlockPtr decodeBlock(
+   const unordered_map<small_string, uint16_t> &words_rev,
+   istream &in, ostream &out)
+{
+   BlockPtr block(std::make_shared<Block>());
+   uint32_t *const native_buffer = block->data() + 1;
+
+   streamsize i;
+   for (i = 0; i < NATIVE_BUFFER_SIZE; i++)
+   {
+      try
+      {
+         const uint16_t word1 = decodeWord(words_rev, in, "during block", '.');
+      }
+      catch (EndOfBlock const&)
+      {
+         // TODO: padding if i <= 2
+      }
+      try
+      {
+         const uint16_t word2 = decodeWord(words_rev, in, "during block", '.');
+      }
+      catch (EndOfBlock const&)
+      {
+         // TODO: padding if i < 2; might as well keep it out of the loop to avoid small special cases in the loop
+         // and to avoid being bottom-up; rather we need to keep being top-down and recursive descent
+      }
+      char buffer[sizeof(uint32_t)];
+      writeu16(buffer, word1);
+      writeu16(buffer + sizeof word1, word2);
+      native_buffer[i] = readu32(buffer);
+   }
+   block->front() = i;
+   return block;
+}
+
 void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in, ostream &out)
+{
+   CbcMac mac(static_key);
+   Buffers buffers;
+   uint16_t expectedMac[sizeof mac.digest() / sizeof(uint16_t)] = {};
+   decodeMAC(words_rev, in, "during initial MAC", expectedMac, ',');
+
+   // TODO: make a decodeBlock function that reads for BUFFER_SIZE/sizeof(uint16_t) or until EOF
+   // and does the native conversion, btea, MAC (with lambda?), etc.
+
+   throw error(__FILE__,__LINE__,"Not implemented");
+}
+#if 0
+void decodeOld(const unordered_map<small_string, uint16_t> &words_rev, istream &in, ostream &out)
 {
    CbcMac mac(static_key);
    Buffers buffers;
@@ -292,25 +402,7 @@ void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in,
    size_t macPos;
    for (macPos = 0; macPos < sizeof mac.digest() / sizeof(uint16_t); ++macPos)
    {
-      if (in >> word)
-      {
-         const auto words_rev_iter = words_rev.find(word);
-         if (words_rev_iter == words_rev.end())
-         {
-            string msg("unexpected word during initial MAC: `");
-            msg += word + '\'';
-            throw error(__FILE__, __LINE__, msg);
-         }
-         expectedMac[macPos] = words_rev_iter->second;
-      }
-      else
-      {
-         string msg("unexpected ");
-         msg += in.eof() ? "EOF" : "word too long `";
-         if (not in.eof()) msg += word + '`';
-         msg += " during initial MAC";
-         throw error(__FILE__, __LINE__, msg);
-      }
+      expectedMac[macPos] = decodeWord(words_rev, in, "during initial MAC");
    }
    // check how the initial MAC ends and if it is present
    if (in >> word and word == ",")
@@ -321,6 +413,8 @@ void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in,
       throw error(__FILE__, __LINE__, "expected `,' to terminate the initial MAC");
    }
 
+   // TODO: turn the logic upside-down: instead of anchoring on while(in >> word) and going bottom-up
+   // rather describe the structure from the top and in >> word will be at the leaf, i.e. top-down, kind of recursive-descent
    while (in >> word)
    {
       const auto words_rev_iter = words_rev.find(word);
@@ -340,12 +434,12 @@ void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in,
       char *pbuffer;
       if (0 != (pbuffer = bufferise_data(buffers, words_rev_iter->second)))
       { // the buffer is full
-
+         // TODO: refactor in order to merge this with the last block; maybe extract a function?
          // convert to native integers
-         const streamsize data_size = BUFFER_SIZE / sizeof(uint32);
-         uint32 native_buffer[data_size];
+         const streamsize data_size = BUFFER_SIZE / sizeof(uint32_t);
+         uint32_t native_buffer[data_size];
          for (streamsize i = 0; i < data_size; ++i) {
-            native_buffer[i] = readu32(pbuffer + sizeof(uint32) * i);
+            native_buffer[i] = readu32(pbuffer + sizeof(uint32_t) * i);
          }
 
          // update mac with encrypted data
@@ -368,7 +462,7 @@ void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in,
 
          // convert back to bytes
          for (streamsize i = 0; i < data_size; ++i) {
-            writeu32(pbuffer + sizeof(uint32) * i, native_buffer[i]);
+            writeu32(pbuffer + sizeof(uint32_t) * i, native_buffer[i]);
          }
          remove_padding(buffers, out);
       }
@@ -378,7 +472,7 @@ void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in,
    {
       string msg("unexpected ");
       msg += "word too long `";
-      msg += word + '`';
+      msg += word + '\'';
       throw error(__FILE__, __LINE__, msg);
    }
 
@@ -391,10 +485,10 @@ last_block:
    if (data_size > 0)
    {
       // convert to native integers
-      const streamsize contents_size = data_size / sizeof(uint32);
-      uint32 native_buffer[NATIVE_BUFFER_SIZE];
+      const streamsize contents_size = data_size / sizeof(uint32_t);
+      uint32_t native_buffer[NATIVE_BUFFER_SIZE];
       for (streamsize i = 0; i < contents_size; ++i) {
-         native_buffer[i] = readu32(pbuffer + sizeof(uint32) * i);
+         native_buffer[i] = readu32(pbuffer + sizeof(uint32_t) * i);
       }
 
       // update mac with encrypted data
@@ -437,7 +531,7 @@ last_block:
 
       // convert back to bytes
       for (streamsize i = 0; i < contents_size; ++i) {
-         writeu32(pbuffer + sizeof(uint32) * i, native_buffer[i]);
+         writeu32(pbuffer + sizeof(uint32_t) * i, native_buffer[i]);
       }
 
       remove_padding(buffers, out);
@@ -445,7 +539,7 @@ last_block:
 
    remove_padding(buffers, out); // flush any buffered data
 }
-
+#endif
 void generate_words(vector<small_string> &words)
 {
    clog << "opening words.txt..." << endl;

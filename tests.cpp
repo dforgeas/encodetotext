@@ -107,7 +107,9 @@ static int unit_tests(int argc, char *argv[])
       results[n - start] = in.str() == result.str();
 
       /* display a progress bar */
-      const int new_progress = (n - start) * max_progress / (stop - start - 1);
+      const int new_progress{stop - start != 1
+         ? (n - start) * max_progress / (stop - start - 1)
+         : max_progress};
       if (new_progress != progress)
       {
          progress = new_progress;
@@ -119,7 +121,7 @@ static int unit_tests(int argc, char *argv[])
 
    /* display the results */
    streamsize total = 0, failed = 0;
-   cout << "\nFAILED: ";
+   if (not results.empty()) cout << "\nFAILED: ";
    for (vector<bool>::const_iterator it = results.begin()
        ; it != results.end()
        ; ++it)

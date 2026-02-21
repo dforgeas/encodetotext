@@ -261,7 +261,7 @@ invalid_padding:
    throw error(__FILE__, __LINE__, msg.str());
 }
 
-void check_mac(CbcMac const& mac, const char*const kind, uint16_t (&expectedMac)[sizeof mac.digest() / sizeof(uint16_t)])
+void check_mac(CbcMac const& mac, const char*const kind, uint16_t (&expectedMac)[sizeof mac.digest() / (sizeof(uint16_t))])
 {
    bool ok = true;
    size_t e = 0;
@@ -287,9 +287,10 @@ void decode(const unordered_map<small_string, uint16_t> &words_rev, istream &in,
    CbcMac mac(static_key);
    Buffers buffers;
    small_string word;
-   uint16_t expectedMac[sizeof mac.digest() / sizeof(uint16_t)] = {};
+   constexpr size_t macDigestSizeInWords = sizeof mac.digest() / (sizeof(uint16_t));
+   uint16_t expectedMac[macDigestSizeInWords] = {};
    size_t macPos;
-   for (macPos = 0; macPos < sizeof mac.digest() / sizeof(uint16_t); ++macPos)
+   for (macPos = 0; macPos < macDigestSizeInWords; ++macPos)
    {
       if (in >> word)
       {
@@ -401,7 +402,7 @@ last_block:
 
       // check the final MAC before finishing
       // TODO: if (not in.good()) make this optional?
-      for (macPos = 0; macPos < sizeof mac.digest() / sizeof(uint16_t); ++macPos)
+      for (macPos = 0; macPos < macDigestSizeInWords; ++macPos)
       {
          if (in >> word)
          {
